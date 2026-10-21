@@ -2,6 +2,7 @@ import { stockSvg } from './stock-export';
 import type { TraceOptions, TraceResult } from './engine';
 import type { AutoTraceInfo } from './auto-trace';
 import { restoreManualSettings, type AppliedSettings } from './settings-state';
+import { AUTO_PALETTE_REVISION } from './auto-settings';
 
 export interface BatchConfig { mode: 'auto' | 'manual'; resolution: number; options: TraceOptions }
 export interface BatchOutput { result: TraceResult; auto?: AutoTraceInfo }
@@ -9,6 +10,7 @@ export interface BatchItem {
   id: string; file: File; config: BatchConfig; status: 'pending' | 'processing' | 'success' | 'error';
   progress: number; label: string; output?: BatchOutput; error?: string;
   autoSettings?: AppliedSettings;
+  autoSettingsRevision?: number;
 }
 export const BATCH_LIMIT = 50;
 export type BatchRunner = (item: BatchItem, signal: AbortSignal, progress: (value: number, label: string) => void) => Promise<BatchOutput>;
@@ -36,20 +38,23 @@ export class TraceBatch {
   setDetected(id: string, settings: AppliedSettings) {
     if (this.running) return;
     const item = this.items.find(item => item.id === id);if (!item) return;
+    const stale = item.autoSettingsRevision !== AUTO_PALETTE_REVISION;
     item.autoSettings = restoreManualSettings(settings);
-    if (item.config.mode === 'auto' && !item.output) item.config = {...structuredClone(item.autoSettings),mode:'auto'};
+    item.autoSettingsRevision = AUTO_PALETTE_REVISION;
+    if (item.config.mode === 'auto' && (!item.output || stale)) item.config = {...structuredClone(item.autoSettings),mode:'auto'};
     this.changed(true);
   }
   switchMode(id: string, mode: 'auto' | 'manual') {
     if (this.running) return;
     const item = this.items.find(item => item.id === id);if (!item || item.config.mode === mode) return;
-    const settings = item.autoSettings ?? item.output?.auto ?? item.config;
+    const settings = item.autoSettings ?? item.config;
     this.updateConfig(id,{...restoreManualSettings(settings),mode});
   }
   resetAutoSettings() {
     if (this.running) return;
     for (const item of this.items) {
       delete item.autoSettings;
+      delete item.autoSettingsRevision;
       if (item.config.mode === 'auto') { item.status = 'pending'; item.progress = 0; item.label = 'Menunggu'; delete item.output; delete item.error; }
     }
     this.changed(true);
@@ -71,7 +76,7 @@ export class TraceBatch {
           });
           if (controller.signal.aborted) { item.status = 'pending'; item.progress = 0; item.label = 'Dibatalkan'; break; }
           item.output = output; item.status = 'success'; item.progress = 100; item.label = 'Selesai';
-          if (output.auto) {item.autoSettings = restoreManualSettings(output.auto);if (item.config.mode === 'auto') item.config = {...structuredClone(item.autoSettings),mode:'auto'};}
+          if (output.auto) {item.autoSettings = restoreManualSettings(output.auto);item.autoSettingsRevision = AUTO_PALETTE_REVISION;if (item.config.mode === 'auto') item.config = {...structuredClone(item.autoSettings),mode:'auto'};}
         } catch (error) {
           if (controller.signal.aborted || error instanceof Error && error.name === 'AbortError') { item.status = 'pending'; item.progress = 0; item.label = 'Dibatalkan'; break; }
           item.status = 'error'; item.error = error instanceof Error ? error.message : String(error); item.label = 'Gagal';
@@ -130,7 +135,11 @@ export async function loadBatch(): Promise<BatchItem[]> {
     const file = new File([blob],record.fileName,{type:record.fileType,lastModified:record.lastModified});
     const manual = restoreManualSettings(record.config), config = { ...manual, mode: record.config?.mode === 'manual' ? 'manual' as const : 'auto' as const };
     const status = record.status === 'success' && record.output?.result?.svg ? 'success' : record.status === 'error' ? 'error' : 'pending';
-    restored.push({id:record.id,file,config,status,progress:status === 'success' ? 100 : 0,label:status === 'success' ? 'Selesai' : status === 'error' ? 'Gagal' : 'Menunggu',output:status === 'success' ? record.output : undefined,error:record.error,autoSettings:record.autoSettings ? restoreManualSettings(record.autoSettings) : record.output?.auto ? restoreManualSettings(record.output.auto) : undefined});
+    // Refresh legacy recommendations when the source is next opened. Preserve
+    // Manual controls, saved vectors and queue state while detection is pending.
+    const currentAuto = record.autoSettingsRevision === AUTO_PALETTE_REVISION;
+    const autoSettings = currentAuto ? record.autoSettings ?? record.output?.auto : undefined;
+    restored.push({id:record.id,file,config,status,progress:status === 'success' ? 100 : 0,label:status === 'success' ? 'Selesai' : status === 'error' ? 'Gagal' : 'Menunggu',output:status === 'success' ? record.output : undefined,error:record.error,autoSettings:autoSettings ? restoreManualSettings(autoSettings) : undefined,autoSettingsRevision:currentAuto ? AUTO_PALETTE_REVISION : undefined});
   }
   return restored;
 }

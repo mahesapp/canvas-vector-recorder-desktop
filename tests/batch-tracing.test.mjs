@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { moduleUrl } from './helpers/tracing-module.mjs';
 const { TraceBatch, batchEntries, saveBatch, loadBatch }=await import(await moduleUrl('batch'));
+const { AUTO_PALETTE_REVISION }=await import(await moduleUrl('auto-settings'));
 const { batchZip }=await import(await moduleUrl('batch-zip'));
 const { runTraceWorker }=await import(await moduleUrl('file-task'));
 const config={mode:'auto',resolution:1024,options:{colors:6,tolerance:.8,minArea:4,smooth:true,removeWhite:false,whiteMode:'none'}};
@@ -52,6 +53,27 @@ test('IndexedDB restores source bytes, results, errors and interrupted jobs in o
   assert.equal(await restored[0].file.text(),'image-bytes');assert.equal(restored[0].file.lastModified,1234);
   const resumed=new TraceBatch();resumed.items=restored;let jobs=0;await resumed.run(async()=>{jobs++;return output;});assert.equal(jobs,1);
   const first=saveBatch(resumed.items),second=saveBatch([]);await Promise.all([first,second]);assert.deepEqual(await loadBatch(),[]);
+});
+
+test('legacy Auto recommendations refresh without losing Manual settings or completed vectors',async()=>{
+  const queue=new TraceBatch();queue.add([file('legacy-auto.png'),file('legacy-manual.png')],config);
+  for(const item of queue.items) {
+    item.status='success';item.output={...output,auto:{...config}};item.autoSettings={resolution:1024,options:{...config.options,colors:4}};
+  }
+  queue.items[1].config={...config,mode:'manual',options:{...config.options,colors:9}};
+  await saveBatch(queue.items);
+  const restored=await loadBatch();
+  assert.ok(restored.every(item=>!item.autoSettings));assert.ok(restored.every(item=>item.output.result.svg===svg&&item.status==='success'));
+  assert.equal(restored[1].config.options.colors,9);
+  const refreshed={resolution:1024,options:{...config.options,colors:3}};queue.items=restored;
+  for(const item of queue.items)queue.setDetected(item.id,refreshed);
+  assert.equal(queue.items[0].config.options.colors,3);assert.equal(queue.items[1].config.options.colors,9);
+  assert.ok(queue.items.every(item=>item.output.result.svg===svg&&item.autoSettingsRevision===AUTO_PALETTE_REVISION));
+  await saveBatch(queue.items);const current=await loadBatch();
+  assert.ok(current.every(item=>item.autoSettings.options.colors===3));
+  assert.equal(current[1].config.options.colors,9);
+  queue.items=current;queue.switchMode(current[1].id,'auto');assert.equal(queue.items[1].config.options.colors,3);
+  await saveBatch([]);
 });
 
 test('ZIP includes only successful SVGs with safe, case-insensitive unique names',async t=>{

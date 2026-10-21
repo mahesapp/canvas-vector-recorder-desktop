@@ -79,7 +79,7 @@ test('list → item editor → Auto/Manual → selected tracing → export keeps
   $('traceRun').click();await wait(()=>!$('traceDownload').disabled&&!$('traceRun').disabled);
   const firstVectorThumbnail=root.querySelector('.trace-vector-image').src;assert.match(firstVectorThumbnail,/^blob:/);
   assert.ok(root.querySelectorAll('.trace-item-palette span').length>0);
-  change('traceExportRatio','4:5');change('traceExportMin','20');change('traceExportScale','80');
+  change('traceExportRatio','4:5');change('traceExportMin','20');change('traceExportScale','80');change('traceExportMaxColors','2');
   assert.equal($('traceOutput').hidden,false);$('traceDownload').click();$('traceDownloadSvg').click();await wait(()=>globalThis.__tracingExports.length===1);
   assert.equal(globalThis.__tracingExports[0].command,'save_tracing_svg');assert.equal(globalThis.__tracingExports[0].args.filename,'first-traced.svg');
   assert.equal(globalThis.__tracingExports[0].args.settings.ratio,'4:5');assert.equal(globalThis.__tracingExports[0].args.settings.minPixels,20_000_000);assert.equal(globalThis.__tracingExports[0].args.settings.artworkScale,.8);
@@ -107,12 +107,27 @@ test('list → item editor → Auto/Manual → selected tracing → export keeps
   await wait(()=>root.querySelectorAll('.trace-source-image[src]').length===3);
   dom.dispatchEvent(new dom.Event('beforeunload'));root.remove();
   assert.equal(liveUrls.size,0,'closing the workspace releases editor and gallery URLs');
+  // Simulate an Auto result saved before the palette revision. Its SVG remains
+  // viewable, while detection must replace the old recommendation and controls.
+  current[0].config={...current[0].config,mode:'auto',options:{...current[0].config.options,colors:8}};
+  current[0].output.auto={options:current[0].config.options,resolution:current[0].config.resolution,fallback:'none'};
+  delete current[0].autoSettingsRevision;
+  await saveBatch(current);
   const reopened=dom.document.createElement('main');reopened.className='tracing-page';dom.document.body.append(reopened);initTracing(reopened);
   await wait(()=>reopened.querySelectorAll('.trace-batch-item').length===3&&!reopened.querySelector('#traceBatchAdd').disabled);
   await wait(()=>reopened.querySelectorAll('.trace-source-image[src]').length===3);
   assert.equal(reopened.querySelector('#traceExportRatio').value,'4:5');assert.equal(reopened.querySelector('#traceExportMin').value,'20');assert.equal(reopened.querySelector('#traceExportScale').value,'80');
+  assert.equal(reopened.querySelector('#traceExportMaxColors').value,'2');
   assert.equal(reopened.querySelector('#traceBatchItems').dataset.layout,'grid','layout choice survives reopening');
   assert.equal(reopened.querySelectorAll('.trace-vector-image[src]').length,1,'completed SVG thumbnails are restored from saved results');
+  reopened.querySelectorAll('.trace-batch-name')[0].click();
+  await wait(()=>!reopened.querySelector('#traceMode').disabled&&reopened.querySelector('#traceAutoSummary').textContent.includes('Pengaturan awal'));
+  assert.equal(reopened.querySelector('#traceColors').value,'2');
+  assert.equal(reopened.querySelector('#traceOutput').hidden,false,'refreshing Auto keeps the saved SVG visible');
+  reopened.querySelector('#traceBack').click();reopened.querySelectorAll('.trace-batch-name')[0].click();
+  await wait(()=>!reopened.querySelector('#traceRun').disabled&&reopened.querySelector('#traceFileInfo').textContent==='first.png');
+  assert.equal(reopened.querySelector('#traceColors').value,'2','historical output metadata cannot restore stale controls');
+  reopened.querySelector('#traceBack').click();
   assert.equal(reopened.dataset.traceView,'list');reopened.querySelectorAll('.trace-batch-name')[1].click();
   await wait(()=>reopened.querySelector('#traceFileInfo').textContent==='second.png'&&!reopened.querySelector('#traceRun').disabled);
   assert.equal(reopened.querySelector('#traceMode').value,'manual');assert.equal(reopened.querySelector('#traceColors').value,'2');

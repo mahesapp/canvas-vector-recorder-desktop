@@ -1,5 +1,11 @@
 # Changelog
 
+## Belum dirilis
+
+- Auto memilih jumlah warna ilustrasi dari palet yang sudah dibersihkan, termasuk kandidat warna ganjil. Campuran antialias tidak lagi memicu rekomendasi warna/resolusi berlebihan.
+- Rekomendasi Auto lama diperbarui ketika gambar dibuka kembali, sambil mempertahankan pengaturan Manual dan SVG tersimpan.
+- Kontur ilustrasi datar dirapikan setelah fitting dengan batas pergeseran bentuk, penjagaan sudut dan ketebalan garis, serta pemeriksaan kualitas detail sebelum kandidat diterima.
+
 ## 1.1.9
 
 - Tile Vectorizer yang memiliki stroke kini tergabung dengan urutan gambar yang konsisten.

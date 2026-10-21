@@ -230,6 +230,7 @@ h2 { font-size: 13px; font-weight: 600; margin-bottom: 11px; }
 .workspace-shell { display: flex; flex-direction: column; max-width: 2048px; padding-top: 4px; padding-bottom: 20px; overflow: hidden; }
 .workspace-shell > .topbar { flex-shrink: 0; }
 .main-tabs { display: flex; align-items: center; gap: 6px; max-width: 2048px; margin: 0 auto; padding: 10px 16px; background: var(--m3-surface); min-height: 40px; margin-top: 0; border-bottom: 1px solid var(--m3-outline-variant); }
+.main-tabs > button, .main-tabs > .target-tabs-count { flex-shrink: 0; }
 .main-tab { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 92px; min-height: 32px; padding: 5px 12px; border: 0; border-radius: 16px; background: transparent; color: var(--m3-muted); font-size: 11px; font-weight: 500; transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease; }
 .main-tab:hover { background: var(--m3-surface-high); color: var(--m3-on-surface); }
 .main-tab.active { color: #ffffff; background: #1a73e8; border: 1px solid #1a73e8; box-shadow: none; font-weight: 600; }
@@ -238,9 +239,11 @@ h2 { font-size: 13px; font-weight: 600; margin-bottom: 11px; }
 .new-target-main-tab:hover { background: var(--m3-surface-high); color: var(--gemini-blue); }
 .new-target-main-tab:disabled { color: var(--m3-outline-variant); }
 .lucide { display: block; width: 15px; height: 15px; flex: 0 0 auto; stroke-width: 2; }
-.target-main-tabs { display: flex; gap: 4px; min-width: 0; }
+.target-main-tabs { display: flex; flex: 1 1 0; gap: 4px; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: var(--m3-outline-variant) transparent; }
+.target-tab-scroll { min-width: 28px; width: 28px; height: 32px; padding: 0; }
+.target-tab-scroll:disabled { opacity: .35; }
 .target-tabs-count { display: inline-flex; align-items: center; align-self: center; min-height: 24px; margin-left: 5px; padding: 0 7px; color: var(--m3-muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.target-tab-wrap { position: relative; display: flex; }
+.target-tab-wrap { position: relative; display: flex; flex: 0 0 auto; }
 .target-tab-wrap .target-main-tab { min-width: 100px; max-width: 180px; padding: 0 48px 0 10px; border-radius: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .target-tab-wrap .target-main-tab { justify-content: flex-start; text-align: left; }
 .target-tab-index { display: inline-grid; place-items: center; flex: 0 0 auto; width: 16px; height: 16px; margin-right: 1px; color: currentColor; font-size: 10px; font-variant-numeric: tabular-nums; opacity: .72; }

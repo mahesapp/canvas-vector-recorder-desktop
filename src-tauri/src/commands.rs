@@ -806,9 +806,9 @@ fn legacy_open_target_tab(
         if target.tabs.is_empty() || target.session_id.is_empty() {
             return Err(AppError::Window("Sesi target belum siap.".into()));
         }
-        if target.tabs.len() >= MAX_TARGET_TABS {
+        if let Some(limit) = crate::MAX_TARGET_TABS.filter(|&limit| target.tabs.len() >= limit) {
             return Err(AppError::Window(format!(
-                "Maksimal {MAX_TARGET_TABS} tab dapat dibuka dalam satu window."
+                "Maksimal {limit} tab dapat dibuka dalam satu window."
             )));
         }
         target.tabs.push(TargetTab {
@@ -1119,6 +1119,7 @@ pub(crate) fn target_webviews(app: &AppHandle) -> Vec<tauri::Webview> {
 pub(crate) fn target_payload(state: &TargetState) -> serde_json::Value {
     serde_json::json!({
         "active_id": state.active_id,
+        "max_tabs": crate::MAX_TARGET_TABS,
         "tabs": state.tabs.iter().map(|tab| serde_json::json!({
             "id": tab.id,
             "url": tab.url,

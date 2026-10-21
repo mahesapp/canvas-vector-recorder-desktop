@@ -78,7 +78,11 @@
       </button>
       <button id="newTargetMainTab" class="main-tab new-target-main-tab" type="button" title="Buka tab target baru"
         aria-label="Buka tab target baru"><i data-lucide="plus" aria-hidden="true"></i></button>
-      <div id="targetMainTabs" class="target-main-tabs"></div>
+      <button id="scrollTargetTabsLeft" class="main-tab target-tab-scroll" type="button" title="Geser tab ke kiri"
+        aria-label="Geser tab ke kiri" aria-controls="targetMainTabs" hidden><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+      <div id="targetMainTabs" class="target-main-tabs" aria-label="Daftar tab target"></div>
+      <button id="scrollTargetTabsRight" class="main-tab target-tab-scroll" type="button" title="Geser tab ke kanan"
+        aria-label="Geser tab ke kanan" aria-controls="targetMainTabs" hidden><i data-lucide="chevron-right" aria-hidden="true"></i></button>
       <span id="targetTabsCount" class="target-tabs-count" role="status" aria-label="Jumlah tab target" hidden></span>
     </nav>
 

@@ -11,11 +11,13 @@ const wait=async predicate=>{for(let i=0;i<100;i++){if(predicate())return;await 
 test('licensed startup → mode menu → Recorder/offline → menu keeps editor and hides native target',async t=>{
   const dom=new Window({url:'http://localhost:1420',settings:{disableCSSFileLoading:true,disableJavaScriptFileLoading:true,disableComputedStyleRendering:true}});
   Object.defineProperty(dom.navigator,'userAgent',{value:'Windows desktop test'});
-  Object.assign(globalThis,{window:dom,document:dom.document,localStorage:dom.localStorage,Event:dom.Event});
+  Object.assign(globalThis,{window:dom,document:dom.document,localStorage:dom.localStorage,Event:dom.Event,MutationObserver:dom.MutationObserver});
   globalThis.setTimeout=dom.setTimeout.bind(dom);globalThis.clearTimeout=dom.clearTimeout.bind(dom);
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:dom.navigator});
   dom.document.write((await readFile(new URL('../src/index.html',import.meta.url),'utf8')).replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,''));
   dom.HTMLCanvasElement.prototype.getContext=()=>null;
+  const revealedTabs=[];
+  dom.HTMLElement.prototype.scrollIntoView=function(options){revealedTabs.push({id:this.querySelector('[data-target-id]')?.dataset.targetId,options});};
   t.after(()=>dom.happyDOM.close());
   const calls=[],events=new Map();let resolveLicense,traceInits=0;
   globalThis.__navigationHost={
@@ -30,6 +32,7 @@ test('licensed startup → mode menu → Recorder/offline → menu keeps editor 
   const license=dataModule('export const licenseStatus=()=>globalThis.__navigationHost.licenseStatus();export const activateLicense=()=>globalThis.__navigationHost.activateLicense();export const normalizedEmail=s=>s.trim().toLowerCase();');
   const tracing=dataModule('export const initTracing=root=>globalThis.__navigationHost.initTracing(root);');
   const discover=dataModule('export const initDiscover=()=>({setEnabled(){}});');
+  const loader=dataModule('export const initRecorderLoader=()=>{};');
   let source=await readFile(new URL('../src/main.ts',import.meta.url),'utf8');
   const iconImport=source.match(/import\s*\{([^{}]*?)\}\s*from 'lucide';/);
   const iconNames=iconImport[1].split(',').map(s=>s.trim()).filter(Boolean);
@@ -38,8 +41,10 @@ test('licensed startup → mode menu → Recorder/offline → menu keeps editor 
   // Run the production app controller against the real HTML. Only platform
   // services and the editor boundary are stubbed; the editor has its own worker test.
   source=source.replace(/import '\.\/styles\.css';/,'').replace(/import packageJson from '\.\.\/package\.json';/,'const packageJson={version:"test"};');
+  // Simulate Vite's environment and skip the splash delay for navigation tests.
+  source=source.replaceAll('import.meta.env.PROD','true').replace(/const LANDING_DURATION_MS = [\d_]+;/,'const LANDING_DURATION_MS = 0;');
   for(const name of ['@tauri-apps/api/core','@tauri-apps/api/event','@tauri-apps/plugin-updater','@tauri-apps/plugin-dialog'])source=source.replaceAll(`'${name}'`,JSON.stringify(host));
-  for(const [name,url] of [['lucide',icons],['./license',license],['./discover',discover],['./tracing/page',tracing],['./mode-selection',mode]])source=source.replaceAll(`'${name}'`,JSON.stringify(url));
+  for(const [name,url] of [['lucide',icons],['./license',license],['./discover',discover],['./recorder-loader',loader],['./tracing/page',tracing],['./mode-selection',mode]])source=source.replaceAll(`'${name}'`,JSON.stringify(url));
   await import(dataModule(transpile(source)));
   dom.document.dispatchEvent(new dom.Event('DOMContentLoaded'));
   const $=id=>dom.document.getElementById(id);
@@ -67,4 +72,33 @@ test('licensed startup → mode menu → Recorder/offline → menu keeps editor 
   dom.document.querySelector('[data-target-id="tab1"]').click();assert.equal($('targetView').hidden,false);assert.equal(calls.filter(call=>call.command==='set_target_view_visible').at(-1).args.visible,true);
   $('homeMainTab').click();assert.equal($('targetView').hidden,true);assert.equal(calls.at(-1).args.visible,false);
   assert.equal(calls.some(call=>call.command==='open_target_url'||call.command==='open_target_tab'),false,'choosing online opens the existing Recorder');
+  const tabs=Array.from({length:5},(_,index)=>({id:`tab${index}`,title:`Tab ${index}`,url:'https://example.com'}));
+  events.get('target-tabs-updated')({payload:{active_id:'tab0',tabs,max_tabs:5}});
+  assert.equal($('newTargetMainTab').disabled,true);assert.equal($('targetTabsCount').textContent,'5/5');
+  events.get('target-tabs-updated')({payload:{active_id:'tab0',tabs,max_tabs:null}});
+  assert.equal($('newTargetMainTab').disabled,false);assert.equal($('targetTabsCount').textContent,'5 tab');
+  $('targetUrl').value='https://example.com/sixth';$('newTargetMainTab').click();
+  await wait(()=>calls.some(call=>call.command==='open_target_tab'));
+  await wait(()=>!$('newTargetMainTab').disabled);
+  assert.equal(calls.find(call=>call.command==='open_target_tab').args.url,'https://example.com/sixth');
+  const manyTabs=Array.from({length:12},(_,index)=>({id:`tab${index}`,title:`Vector Magic ${index + 1}`,url:'https://example.com'}));
+  const strip=$('targetMainTabs');let viewportWidth=500;
+  Object.defineProperties(strip,{clientWidth:{get:()=>viewportWidth},scrollWidth:{get:()=>12*184}});
+  events.get('target-tabs-updated')({payload:{active_id:'tab11',tabs:manyTabs,max_tabs:null}});
+  assert.equal(strip.querySelectorAll('.target-tab-wrap').length,12);
+  assert.deepEqual(revealedTabs.at(-1),{id:'tab11',options:{block:'nearest',inline:'nearest'}});
+  assert.equal($('scrollTargetTabsLeft').hidden,false);assert.equal($('scrollTargetTabsRight').hidden,false);
+  assert.equal($('scrollTargetTabsLeft').disabled,true);assert.equal($('scrollTargetTabsRight').disabled,false);
+  $('scrollTargetTabsRight').click();assert.ok(strip.scrollLeft>0);assert.equal($('scrollTargetTabsLeft').disabled,false);
+  const previousOffset=strip.scrollLeft,previousReveals=revealedTabs.length;
+  events.get('target-tabs-updated')({payload:{active_id:'tab11',tabs:manyTabs,max_tabs:null}});
+  assert.equal(strip.scrollLeft,previousOffset,'background tab updates preserve the chosen scroll position');
+  assert.equal(revealedTabs.length,previousReveals,'background updates do not drag the strip back to the active tab');
+  $('scrollTargetTabsLeft').click();assert.equal(strip.scrollLeft,0);
+  strip.scrollLeft=strip.scrollWidth-strip.clientWidth;strip.dispatchEvent(new dom.Event('scroll'));
+  assert.equal($('scrollTargetTabsRight').disabled,true);
+  strip.querySelector('[data-target-id="tab7"]').click();assert.equal(revealedTabs.at(-1).id,'tab7');
+  viewportWidth=900;dom.dispatchEvent(new dom.Event('resize'));assert.equal(revealedTabs.at(-1).id,'tab7');
+  $('homeMainTab').click();$('offlineTracingChoice').click();
+  assert.equal($('scrollTargetTabsLeft').hidden,true);assert.equal($('scrollTargetTabsRight').hidden,true);
 });

@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
+import { Window } from 'happy-dom';
 import { moduleUrl } from './helpers/tracing-module.mjs';
 const { stockSvg, checkStockSize } = await import(await moduleUrl('stock-export'));
 const { generatePostScript, parseSvgDimensions } = await import(await moduleUrl('eps-export'));
 const { batchZip } = await import(await moduleUrl('batch-zip'));
 const { tracingSvgPaths } = await import(await moduleUrl('svg-paths'));
+const { exportDefaults, exportSource, initGlobalExportSettings, validateExportSettings } = await import(await moduleUrl('export-settings'));
+const { traceRaster } = await import(await moduleUrl('engine'));
 // Run the production browser export path; only the native host is simulated.
 let renderer = ts.transpileModule(await readFile(new URL('../src/tracing/export-render.ts', import.meta.url), 'utf8'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
@@ -57,5 +60,54 @@ test('browser export layout preserves underpaint clipping in SVG and EPS', async
     assert.equal(eps.match(/setrgbcolor/g)?.length, removeWhiteBackground ? 1 : 2);
     assert.match(eps, /3 3 moveto\n3 5 lineto\n5 5 lineto\n5 3 lineto\nclosepath\nclip\n/);
     assert.ok(eps.indexOf('concat\n') < eps.indexOf('\nclip\n'));
+  }
+});
+
+test('global maximum colors retraces only exports exceeding the limit and preserves item settings', async () => {
+  const width = 32, height = 32, pixels = new Uint8ClampedArray(width * height * 4);
+  const palette = [[255,0,0,255], [0,255,0,255], [0,0,255,255], [255,255,0,255]];
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) pixels.set(palette[Math.floor(x / 8)], (y * width + x) * 4);
+  const options = { colors: 4, tolerance: .8, minArea: 0, smooth: false, removeWhite: false, whiteMode: 'none' };
+  const result = traceRaster(pixels, width, height, options);
+  const item = { config: { mode: 'auto', resolution: 512, options }, output: { result, auto: { resolution: 1024, options: { ...options, tolerance: .35 } } } };
+  const snapshot = structuredClone(item);
+  const calls = [];
+  const runner = async (copy, signal) => {
+    assert.equal(signal.aborted, false);
+    calls.push(copy.config);
+    return { result: traceRaster(pixels, width, height, copy.config.options) };
+  };
+  assert.equal(await exportSource(item, exportDefaults, runner), result.svg);
+  assert.equal(calls.length, 0);
+  const svg = await exportSource(item, { ...exportDefaults, maxColors: 2 }, runner);
+  assert.ok(new Set(tracingSvgPaths(svg).map(path => path.color)).size <= 2);
+  assert.deepEqual(calls, [{ mode: 'manual', resolution: 1024, options: { ...options, tolerance: .35, colors: 2 } }]);
+  assert.deepEqual(item, snapshot, 'export retains the completed result and per-item configuration');
+  const manual = { config: { ...item.config, mode: 'manual' }, output: { result } };
+  await exportSource(manual, { ...exportDefaults, maxColors: 2 }, runner);
+  assert.equal(calls[1].resolution, 512);
+  for (const maxColors of [1, 17, 2.5, NaN]) assert.throws(() => validateExportSettings({ ...exportDefaults, maxColors }), /Maksimum warna/);
+});
+
+test('global maximum colors restores legacy settings, validates and persists changes', async () => {
+  const dom = new Window();
+  const previous = Object.fromEntries(['window', 'document', 'localStorage'].map(key => [key, globalThis[key]]));
+  Object.assign(globalThis, { window: dom, document: dom.document, localStorage: dom.localStorage });
+  try {
+    const oldSettings = { minMp: 20, maxMp: 60, ratio: '4:5', artworkScale: .8, removeWhiteBackground: false };
+    dom.localStorage.setItem('cvr-offline-export-settings', JSON.stringify(oldSettings));
+    const root = dom.document.createElement('div'), read = initGlobalExportSettings(root);
+    assert.deepEqual(read(), { ...oldSettings, maxColors: 16 });
+    const control = root.querySelector('#traceExportMaxColors');
+    control.value = '4'; control.dispatchEvent(new dom.Event('input', { bubbles: true }));
+    const reopened = dom.document.createElement('div');
+    assert.equal(initGlobalExportSettings(reopened)().maxColors, 4);
+    control.value = '1'; control.dispatchEvent(new dom.Event('input', { bubbles: true }));
+    assert.match(root.querySelector('#traceExportError').textContent, /Maksimum warna/);
+    assert.throws(read, /Maksimum warna/);
+    assert.equal(JSON.parse(dom.localStorage.getItem('cvr-offline-export-settings')).maxColors, 4);
+  } finally {
+    Object.assign(globalThis, previous);
+    await dom.happyDOM.close();
   }
 });

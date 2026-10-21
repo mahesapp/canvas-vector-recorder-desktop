@@ -1,5 +1,60 @@
 # Integrasi engine mini-vectorizer
 
+## Pembaruan palet dan kontur 20 Oktober 2026
+
+Port mengikuti `mini-vectorizer` HEAD `0712124`, dengan cakupan pemilihan palet
+Auto dan bounded contour cleanup 0.1.9.
+
+- Untuk artwork, `choosePalette` mencoba 2/3/4/5/6/7/8/10/12/16 warna, lalu
+  memakai jumlah palet interior setelah `compactPalette` sebagai rekomendasi.
+  Foto tetap memakai pencarian 2/4/6/8/12. Audit produksi Java/TypeScript pada
+  56 konfigurasi kini tidak memiliki selisih rekomendasi; sebelumnya ada 26.
+- `AUTO_PALETTE_REVISION` menandai rekomendasi per item. Pemulihan IndexedDB
+  melepas rekomendasi lama untuk dideteksi ulang saat sumber dibuka. Hasil SVG,
+  status antrean dan pengaturan Manual dipertahankan. Metadata hasil lama tidak
+  boleh menggantikan rekomendasi yang sudah diperbarui pada editor.
+- `contour-cleanup.ts` menambahkan proposal sesudah kandidat geometri global
+  dipilih. Hanya smooth dengan toleransi >=1.2 dan cakupan 12 bin RGB dominan
+  >=80% yang memenuhi syarat. Rantai berbagi batas tetap menggunakan satu
+  geometri. Sudut stabil, endpoint, glyph kecil dan garis tertutup tipis dijaga.
+- Dua pass quadratic lokal mengikuti arc length, memakai radius 4 px, koreksi
+  pasangan sisi garis, refit dan compaction. Proposal tidak boleh menambah segmen
+  atau berpotongan; deviasi dua arah dibatasi 0.65 processing px (0.42 untuk
+  lengkung panjang dangkal). Bend energy harus turun setidaknya 30%.
+- Hanya proposal baru memakai gate error global 120% + 1e-6, tepi 125% + 1e-5,
+  tile 125% + 6, serta detail terlindungi 101% + 1e-9. Kedua lintasan memakai
+  seluruh masker detail untuk gate ini. Kandidat lama tetap memakai gate lama.
+  Tradeoff ini sengaja mengizinkan sedikit penyimpangan dari piksel sumber
+  yang tidak rata. Kandidat yang ditolak mempertahankan hasil sebelumnya.
+
+Tes `contour-cleanup.test.mjs` memeriksa batas geometri dua arah secara
+independen, sudut/endpoint, garis tipis, glyph kecil, evidence tekstur, gate
+detail dan integrasi walnut. Bitmap sumber 512 px dan hasil 2x 1024 px dibekukan
+sebagai fixture RGBA terkompresi; pengujian tidak menjalankan model AI.
+Tes batch/editor memeriksa migrasi rekomendasi, hasil tersimpan, serta pembukaan
+ulang editor tanpa mengembalikan nilai Auto lama.
+
+Compaction akhir desktop tetap memakai batas 0.2 px pada tahap fitting lama;
+mini memakai 0.08 px. Audit diagnostik 128 px masih mencatat lima SVG berbeda
+pada korpus lama. Port ini tidak mengklaim identitas SVG seluruh pipeline.
+
+Verifikasi pembaruan:
+
+- TypeScript, build produksi dan `git diff --check` lulus. Tes Rust: 46 lulus.
+- Frontend: 144 dari 145 tes lulus, termasuk tujuh regresi cleanup serta migrasi
+  Auto pada IndexedDB/editor. Satu kegagalan berada pada tes startup di
+  `tests/bridge.test.mjs:342`: tes yang sudah ada mengharapkan logo PNG lama,
+  sementara HTML workspace memakai loader dan aset SVG. File tersebut tidak
+  diubah oleh port ini.
+- Audit Java/TypeScript: 392 tahap segmentasi cocok dan seluruh 56 rekomendasi
+  cocok. Assertion identitas seluruh SVG pada audit historis masih tidak lulus
+  karena perbedaan fitting desktop/Java yang sudah ada.
+- Perbandingan engine desktop sebelum/sesudah pada bitmap walnut 1024 px yang
+  sama (8 warna, toleransi 3.2, cleanup 96): segmen 756 → 685, bend energy turun
+  57.24%, warna tetap sama, path/kontur tetap 59. Error raster naik dari
+  0.00013188 ke 0.00014873 dan error tepi dari 0.00393172 ke 0.00469683, masih
+  dalam tradeoff cleanup di atas. Artefak lokal ada di `build/contour-port-audit`.
+
 ## Pembaruan mesin 7 Oktober 2026
 
 Port mengikuti sumber Java produksi dan perubahan lokal terbaru di mini-vectorizer, termasuk `AutoWhitePolicy`. Sumber mini-vectorizer tidak diubah.

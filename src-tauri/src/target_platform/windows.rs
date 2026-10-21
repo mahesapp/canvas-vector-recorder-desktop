@@ -78,9 +78,9 @@ pub(crate) fn open_target_tab(
         if target.tabs.is_empty() || target.session_id.is_empty() {
             return Err(AppError::Window("Sesi target belum siap.".into()));
         }
-        if target.tabs.len() >= MAX_TARGET_TABS {
+        if let Some(limit) = MAX_TARGET_TABS.filter(|&limit| target.tabs.len() >= limit) {
             return Err(AppError::Window(format!(
-                "Maksimal {MAX_TARGET_TABS} overlay target dapat dibuka."
+                "Maksimal {limit} overlay target dapat dibuka."
             )));
         }
         let tab_id = new_tab_id();

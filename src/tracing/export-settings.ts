@@ -1,13 +1,16 @@
 import type { MicrostockSettings } from '../types';
-import type { BatchItem } from './batch';
+import type { BatchItem, BatchRunner } from './batch';
+import { traceBatchFile } from './file-task';
+import { tracingSvgPaths } from './svg-paths';
 
-export interface GlobalExportSettings { minMp: number; maxMp: number; ratio: string; artworkScale: number; removeWhiteBackground: boolean }
-export const exportDefaults: GlobalExportSettings = { minMp: 15, maxMp: 65, ratio: 'source', artworkScale: 1, removeWhiteBackground: false };
+export interface GlobalExportSettings { minMp: number; maxMp: number; ratio: string; artworkScale: number; removeWhiteBackground: boolean; maxColors?: number }
+export const exportDefaults: GlobalExportSettings = { minMp: 15, maxMp: 65, ratio: 'source', artworkScale: 1, removeWhiteBackground: false, maxColors: 16 };
 export function validateExportSettings(s: GlobalExportSettings): void {
   if (!Number.isFinite(s.minMp) || !Number.isFinite(s.maxMp) || s.minMp < 15 || s.maxMp > 65 || s.maxMp <= s.minMp) throw new Error('Gunakan Min MP ≥ 15 dan Max MP ≤ 65, dengan Max lebih besar dari Min.');
   if (!Number.isFinite(s.artworkScale) || s.artworkScale < .5 || s.artworkScale > 3) throw new Error('Skala artwork harus 50–300%.');
   if (s.ratio !== 'source' && !/^\d+:\d+$/.test(s.ratio)) throw new Error('Rasio artboard tidak valid.');
   if (s.ratio !== 'source' && s.ratio.split(':').some(n => +n < 1 || +n > 10000)) throw new Error('Rasio harus antara 1 dan 10000.');
+  if (s.maxColors !== undefined && (!Number.isInteger(s.maxColors) || s.maxColors < 2 || s.maxColors > 16)) throw new Error('Maksimum warna harus berupa bilangan bulat antara 2 dan 16.');
 }
 export function onlineExportSettings(s: GlobalExportSettings): MicrostockSettings {
   validateExportSettings(s);
@@ -23,11 +26,17 @@ function restoreWhiteArtboard(svg: string): string | null {
   return svg.replace(root, `${root}${background}`);
 }
 
-/** Export the completed vector as-is; export settings only affect its artboard and background. */
-export async function exportSource(item: BatchItem, s: GlobalExportSettings): Promise<string> {
+/** Retrace only the export copy when its palette exceeds the global limit. */
+export async function exportSource(item: BatchItem, s: GlobalExportSettings, runner: BatchRunner = traceBatchFile): Promise<string> {
   validateExportSettings(s);
   if (!item.output) throw new Error('Jalankan tracing terlebih dahulu.');
-  return item.output.result.svg;
+  const svg = item.output.result.svg;
+  const maxColors = s.maxColors ?? exportDefaults.maxColors!;
+  if (new Set(tracingSvgPaths(svg).map(path => path.color.toLowerCase())).size <= maxColors) return svg;
+  const applied = item.output.auto ?? item.config;
+  const config = { mode: 'manual' as const, resolution: applied.resolution, options: { ...applied.options, colors: maxColors } };
+  const output = await runner({ ...item, config }, new AbortController().signal, () => {});
+  return output.result.svg;
 }
 
 export function initGlobalExportSettings(root: HTMLElement): () => GlobalExportSettings {
@@ -50,6 +59,8 @@ export function initGlobalExportSettings(root: HTMLElement): () => GlobalExportS
           <label>Min MP<input id="traceExportMin" type="number" min="15" max="64" step="0.1" value="15"></label>
           <label>Max MP<input id="traceExportMax" type="number" min="15" max="65" step="0.1" value="65"></label>
           <label>Skala artwork (%)<input id="traceExportScale" type="number" min="50" max="300" step="10" value="100"></label>
+          <label>Maksimum warna<input id="traceExportMaxColors" type="number" min="2" max="16" step="1" value="16" aria-describedby="traceExportMaxColorsHelp"></label>
+          <p id="traceExportMaxColorsHelp" class="trace-help">Batas 2–16 warna objek untuk ekspor SVG/EPS dan ZIP. Jika hasil melebihi batas, salinan ekspor ditracing ulang.</p>
           <label>Latar putih<select id="traceExportBackground"><option value="keep">Pertahankan latar putih</option><option value="remove">Hapus latar putih</option></select></label>
         </div>
         <p id="traceExportError" role="status" class="trace-help"></p>
@@ -62,10 +73,10 @@ export function initGlobalExportSettings(root: HTMLElement): () => GlobalExportS
   const get = (id: string) => root.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`)!;
   try {
     const saved = JSON.parse(localStorage.getItem('cvr-offline-export-settings') ?? 'null');
-    if (saved) { validateExportSettings(saved); get('traceExportMin').value = String(saved.minMp); get('traceExportMax').value = String(saved.maxMp); get('traceExportScale').value = String(saved.artworkScale * 100); get('traceExportBackground').value = saved.removeWhiteBackground ? 'remove' : 'keep'; get('traceExportRatio').value = Array.from((get('traceExportRatio') as HTMLSelectElement).options).some(o => o.value === saved.ratio) ? saved.ratio : 'custom'; get('traceExportCustomRatio').value = saved.ratio; }
+    if (saved) { validateExportSettings(saved); get('traceExportMin').value = String(saved.minMp); get('traceExportMax').value = String(saved.maxMp); get('traceExportScale').value = String(saved.artworkScale * 100); get('traceExportMaxColors').value = String(saved.maxColors ?? exportDefaults.maxColors); get('traceExportBackground').value = saved.removeWhiteBackground ? 'remove' : 'keep'; get('traceExportRatio').value = Array.from((get('traceExportRatio') as HTMLSelectElement).options).some(o => o.value === saved.ratio) ? saved.ratio : 'custom'; get('traceExportCustomRatio').value = saved.ratio; }
   } catch { /* Use defaults if stored settings are unavailable or invalid. */ }
   const read = () => {
-    const s = { minMp: +get('traceExportMin').value, maxMp: +get('traceExportMax').value, artworkScale: +get('traceExportScale').value / 100, ratio: get('traceExportRatio').value === 'custom' ? get('traceExportCustomRatio').value.trim() : get('traceExportRatio').value, removeWhiteBackground: get('traceExportBackground').value === 'remove' };
+    const s = { minMp: +get('traceExportMin').value, maxMp: +get('traceExportMax').value, artworkScale: +get('traceExportScale').value / 100, maxColors: +get('traceExportMaxColors').value, ratio: get('traceExportRatio').value === 'custom' ? get('traceExportCustomRatio').value.trim() : get('traceExportRatio').value, removeWhiteBackground: get('traceExportBackground').value === 'remove' };
     validateExportSettings(s); return s;
   };
   const update = () => {

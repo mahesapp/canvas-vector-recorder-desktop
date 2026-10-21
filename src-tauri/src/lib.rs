@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use thiserror::Error;
 
-pub const MAX_TARGET_TABS: usize = 5;
+pub const MAX_TARGET_TABS: Option<usize> = if cfg!(debug_assertions) { None } else { Some(5) };
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TargetTab {

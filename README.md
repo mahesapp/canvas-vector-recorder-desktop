@@ -14,6 +14,10 @@ Generator di Rust mengeluarkan SVG standalone dengan namespace, artboard rasio/m
 
 Menu awal menyediakan **Tracing online** untuk membuka Recorder Canvas/SVG dari situs dan **Tracing offline** untuk mengubah PNG/JPG/WebP lokal menjadi SVG. Offline dimulai dari daftar gambar; buka item untuk melihat editor dengan mode Auto atau Manual dan pengaturan per gambar. Pratinjau asli/vektor mendukung zoom dan panel pengaturan dapat ditutup. **Simpan SVG** mengekspor hasil satu item; **Ekspor ZIP** menyimpan hasil antrean. Tombol **Menu** kembali ke pilihan mode tanpa menghapus antrean, pengaturan, atau hasil. Mengubah pengaturan menandai hasil lama tidak berlaku; proses bisa dibatalkan.
 
+**Maksimum warna** pada Pengaturan ekspor global membatasi palet objek menjadi 2–16 warna untuk SVG/EPS satu item dan ZIP batch. Nilai awal 16 mempertahankan palet hasil tracing yang ada. Jika palet melebihi batas pilihan, salinan ekspor ditracing ulang dari gambar sumber dengan batas tersebut; hasil dan pengaturan per gambar tetap tersimpan. Pilihan ini tersimpan otomatis dan tidak menghitung warna latar artboard tambahan.
+
+Tracing online dapat membuka lebih dari 5 tab/window target pada mode development (Rust debug). Build rilis tetap membatasi maksimal 5 tab/window target. Batas ini berlaku sama pada backend dan tombol tambah tab.
+
 Menu dan tracing offline memakai warna serta layout yang terinspirasi Material 3, tema terang/gelap, indikator fokus keyboard, dan animasi singkat yang mengikuti `prefers-reduced-motion`.
 
 Daftar gambar menampilkan thumbnail sumber (maks. 384 px) dan hasil SVG, status per item, palet, serta ukuran hasil. Pilih tampilan daftar/kartu, cari nama file, atau filter status. Pilihan tampilan tersimpan di perangkat; pencarian dan filter hanya mengubah gambar yang ditampilkan. Thumbnail dibuat berurutan dan URL pratinjau dilepas ketika item atau hasilnya dihapus.

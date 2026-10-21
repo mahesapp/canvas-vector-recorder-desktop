@@ -10,7 +10,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "npm run compile && npm run test:frontend && npm run test:rust",
-    "test:frontend": "node --test tests/stock-export.test.mjs tests/bridge.test.mjs tests/tracing.test.mjs tests/auto-tracing.test.mjs tests/scene-stroke.test.mjs tests/batch-tracing.test.mjs tests/tracing-workspace.test.mjs tests/mode-navigation.test.mjs tests/thumbnail.test.mjs tests/engine-update.test.mjs",
+    "test:frontend": "node --test tests/stock-export.test.mjs tests/bridge.test.mjs tests/tracing.test.mjs tests/auto-tracing.test.mjs tests/scene-stroke.test.mjs tests/batch-tracing.test.mjs tests/tracing-workspace.test.mjs tests/mode-navigation.test.mjs tests/thumbnail.test.mjs tests/engine-update.test.mjs tests/contour-cleanup.test.mjs",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "compile": "tsc --noEmit",
     "license:keygen": "node tools/license-keygen.mjs",

@@ -576,8 +576,8 @@ export function initTracing(root: HTMLElement) {
       $('traceStats').textContent = activeResult.colors.length + ' warna · ' + activeResult.contours + ' kontur · ' + activeResult.segments + ' segmen'; download.disabled = downloadToggle.disabled = saving;
       const auto = item.output.auto;
       if (auto) {
-        settingsState.setAuto({ options: auto.options, resolution: auto.resolution });
-        if (mode.value === 'auto') applyManualSettings(auto.options, auto.resolution);
+        settingsState.setAuto(item.autoSettings);
+        if (mode.value === 'auto' && item.autoSettings) applyManualSettings(item.autoSettings.options, item.autoSettings.resolution);
         const adjustment = auto.fallback === 'resolution' ? 'Resolusi diturunkan.' : auto.fallback === 'palette' ? 'Warna diperbaiki.' : auto.fallback === 'detail' ? 'Detail diperbaiki.' : auto.fallback !== 'none' ? 'Pengaturan disesuaikan pada hasil akhir.' : '';
         autoSummary.textContent = 'Hasil Auto: ' + describeSettings(auto.options, auto.resolution) + (adjustment ? '. ' + adjustment : '');
       }

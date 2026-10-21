@@ -5,10 +5,11 @@ import { geometricHypot } from './geometry-math';
  */
 import { cleanTransitionMixtures, mergeSmallEdgeRegions, transitionDefaults, type TransitionDiagnostics } from './transition-mixtures';
 import { evaluateSvgScene, sceneAllows } from './scene-quality';
+import { allowsContourCleanup, cleanContour, contourBendEnergy, contourCleanupDefaults, flatArtwork, type ContourCleanupDiagnostics } from './contour-cleanup';
 import { balanceStrokeCurvature, regularizeStroke, fairStrokeCurvature, strokeRoughness, flattenStroke, strokeWithin } from './stroke-regularizer';
 export interface TraceOptions { colors: number; tolerance: number; minArea: number; smooth: boolean; removeWhite: boolean; whiteMode?: 'none' | 'background' | 'all' }
 export interface TraceResult { svg: string; colors: string[]; paths: number; contours: number; segments: number; width: number; height: number; diagnostics: TraceDiagnostics }
-export interface TraceDiagnostics extends TransitionDiagnostics { underpaintPairs: number; underpaintPaths: number; sharedFairingCandidates: number; sharedFairingAccepted: number; sharedFairingRoughnessBefore: number; sharedFairingRoughnessAfter: number; unitFragments: number; merges: number; swaps: number; puncturedCorners: number; tangentRefits: number; rasterSteps: number; rasterEnergyBefore: number; rasterEnergyAfter: number; smallAreaConstraints: number; guardedFits: number; fitDeviationBefore: number; fitDeviationAfter: number; mergedTransitionRegions: number; reassignedTransitionPixels: number; straightSpans: number; compactedCurvePairs: number; protectedDetailPixels: number; qualityRefits: number; qualitySkipped: number; finalRasterBefore: number; finalRasterAfter: number; ellipses: number; sceneErrorBefore: number; sceneErrorAfter: number; sceneDetailBefore: number; sceneDetailAfter: number; sceneEdgeBefore: number; sceneEdgeAfter: number; sceneCandidateError: number; globalCandidates: number; globalAccepted: number; regularizedChains: number; protectedDetailCandidates: number; detailProtectionAccepted: number }
+export interface TraceDiagnostics extends TransitionDiagnostics, ContourCleanupDiagnostics { underpaintPairs: number; underpaintPaths: number; sharedFairingCandidates: number; sharedFairingAccepted: number; sharedFairingRoughnessBefore: number; sharedFairingRoughnessAfter: number; unitFragments: number; merges: number; swaps: number; puncturedCorners: number; tangentRefits: number; rasterSteps: number; rasterEnergyBefore: number; rasterEnergyAfter: number; smallAreaConstraints: number; guardedFits: number; fitDeviationBefore: number; fitDeviationAfter: number; mergedTransitionRegions: number; reassignedTransitionPixels: number; straightSpans: number; compactedCurvePairs: number; protectedDetailPixels: number; qualityRefits: number; qualitySkipped: number; finalRasterBefore: number; finalRasterAfter: number; ellipses: number; sceneErrorBefore: number; sceneErrorAfter: number; sceneDetailBefore: number; sceneDetailAfter: number; sceneEdgeBefore: number; sceneEdgeAfter: number; sceneCandidateError: number; globalCandidates: number; globalAccepted: number; regularizedChains: number; protectedDetailCandidates: number; detailProtectionAccepted: number }
 type Point = [number, number];
 type RGB = [number, number, number];
 type Curve = { from: Point; to: Point; controls?: [Point, Point] };
@@ -798,7 +799,7 @@ export function curveDeviation(curves: Curve[], points: Point[]) {
 
 // [ADAPTER-TANGENTS] Independent export guard: retain shared tangents and a
 // maximum sample error. This reparameterizing fit is not the recovered VM solver.
-function fitWithSharedTangents(points: Point[], tolerance: number, left: Point, right: Point, depth = 0): Curve[] {
+export function fitWithSharedTangents(points: Point[], tolerance: number, left: Point, right: Point, depth = 0): Curve[] {
   const a = points[0], b = points[points.length - 1], chord = Math.sqrt(distance2(a, b));
   const along = unit(a, b), back: Point = [-along[0], -along[1]];
   let lineError = 0;
@@ -1421,7 +1422,7 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
   const whiteMode = options.whiteMode ?? (options.removeWhite ? 'all' : 'none');
   if (!['none', 'background', 'all'].includes(whiteMode)) throw new Error('Mode hapus putih tidak valid.');
   progress(10, 'Mencari palet warna…');
-  const diagnostics: TraceDiagnostics = { ...transitionDefaults, underpaintPairs: 0, underpaintPaths: 0, sharedFairingCandidates: 0, sharedFairingAccepted: 0, sharedFairingRoughnessBefore: 0, sharedFairingRoughnessAfter: 0, unitFragments: 0, merges: 0, swaps: 0, puncturedCorners: 0, tangentRefits: 0, rasterSteps: 0, rasterEnergyBefore: 0, rasterEnergyAfter: 0, smallAreaConstraints: 0, guardedFits: 0, fitDeviationBefore: 0, fitDeviationAfter: 0, mergedTransitionRegions: 0, reassignedTransitionPixels: 0, straightSpans: 0, compactedCurvePairs: 0, protectedDetailPixels: 0, qualityRefits: 0, qualitySkipped: 0, finalRasterBefore: 0, finalRasterAfter: 0, ellipses: 0, sceneErrorBefore: 0, sceneErrorAfter: 0, sceneDetailBefore: 0, sceneDetailAfter: 0, sceneEdgeBefore: 0, sceneEdgeAfter: 0, sceneCandidateError: 0, globalCandidates: 0, globalAccepted: 0, regularizedChains: 0, protectedDetailCandidates: 0, detailProtectionAccepted: 0 };
+  const diagnostics: TraceDiagnostics = { ...contourCleanupDefaults, ...transitionDefaults, underpaintPairs: 0, underpaintPaths: 0, sharedFairingCandidates: 0, sharedFairingAccepted: 0, sharedFairingRoughnessBefore: 0, sharedFairingRoughnessAfter: 0, unitFragments: 0, merges: 0, swaps: 0, puncturedCorners: 0, tangentRefits: 0, rasterSteps: 0, rasterEnergyBefore: 0, rasterEnergyAfter: 0, smallAreaConstraints: 0, guardedFits: 0, fitDeviationBefore: 0, fitDeviationAfter: 0, mergedTransitionRegions: 0, reassignedTransitionPixels: 0, straightSpans: 0, compactedCurvePairs: 0, protectedDetailPixels: 0, qualityRefits: 0, qualitySkipped: 0, finalRasterBefore: 0, finalRasterAfter: 0, ellipses: 0, sceneErrorBefore: 0, sceneErrorAfter: 0, sceneDetailBefore: 0, sceneDetailAfter: 0, sceneEdgeBefore: 0, sceneEdgeAfter: 0, sceneCandidateError: 0, globalCandidates: 0, globalAccepted: 0, regularizedChains: 0, protectedDetailCandidates: 0, detailProtectionAccepted: 0 };
   const { labels, palette, flatInteriors } = options.smooth && options.colors >= 8 && options.minArea >= 4 && whiteMode === 'background'
     ? quantizeFlatInteriors(rgba, options.colors, width, height) : { ...quantize(rgba, options.colors), flatInteriors: false };
   const detailEvidence = options.smooth || options.minArea > 0 ? protectDetails(rgba, labels, palette, width, height) : undefined;
@@ -1601,6 +1602,7 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
   diagnostics.sceneEdgeBefore = diagnostics.sceneEdgeAfter = before.edgeError;
   if (options.smooth) {
     let bestError = before.error, selected = false;
+    let selectedGeometry = chains;
     const adapter = { fit: fitWithSharedTangents, compact: compactSmoothCurves };
     for (let attempt = 0; attempt < 3; attempt++) {
       const candidate = chains.map(chain => ({ curves: attempt === 0 ? regularizeStroke(chain.curves, adapter) : balanceStrokeCurvature(chain.curves, attempt === 1 ? .5 : .15) }));
@@ -1611,7 +1613,29 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
       diagnostics.sceneCandidateError = after.error;
       if (sceneAllows(before, after) && (!selected || after.error < bestError)) {
         result = proposed; selected = true; bestError = after.error; diagnostics.globalAccepted++; diagnostics.regularizedChains = changed;
+        selectedGeometry = candidate;
         diagnostics.sceneErrorAfter = after.error; diagnostics.sceneDetailAfter = after.detailError; diagnostics.sceneEdgeAfter = after.edgeError;
+      }
+    }
+    if (options.tolerance >= 1.2 && flatArtwork(rgba)) {
+      let changed = 0, oldBend = 0, newBend = 0;
+      const cleaned = selectedGeometry.map(chain => {
+        const curves = cleanContour(chain.curves, adapter);
+        if (curves !== chain.curves) { changed++; oldBend += contourBendEnergy(chain.curves); newBend += contourBendEnergy(curves); }
+        return { curves };
+      });
+      if (changed) {
+        diagnostics.contourCleanupCandidates++;
+        const proposed = exportGeometry(cleaned), protectedPixels = detailEvidence?.pixels ?? detailPixels;
+        const current = evaluateSvgScene(result.svg, rgba, width, height, whiteMode !== 'none', protectedPixels);
+        const after = evaluateSvgScene(proposed.svg, rgba, width, height, whiteMode !== 'none', protectedPixels);
+        diagnostics.contourCandidateError = after.error; diagnostics.contourDetailBefore = current.detailError; diagnostics.contourDetailAfter = after.detailError;
+        if (allowsContourCleanup(current, after)) {
+          result = proposed; diagnostics.contourCleanupAccepted++; diagnostics.contourCleanupChains = changed;
+          diagnostics.contourBendBefore = oldBend; diagnostics.contourBendAfter = newBend;
+          diagnostics.sceneErrorAfter = after.error; diagnostics.sceneDetailAfter = after.detailError;
+          diagnostics.sceneDetailBefore = current.detailError; diagnostics.sceneEdgeAfter = after.edgeError;
+        }
       }
     }
   }

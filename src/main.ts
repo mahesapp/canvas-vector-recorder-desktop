@@ -8,6 +8,8 @@ import {
   Bell,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardPaste,
   Copy,
   Download,
@@ -46,7 +48,7 @@ if (import.meta.env.PROD) {
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
-const lucideIcons = { Bell, Check, ChevronDown, ClipboardPaste, Copy, Download, DownloadCloud, ExternalLink, FolderOpen, Globe, Lightbulb, Moon, MonitorPlay, Pencil, Pipette, Plus, RefreshCw, RotateCw, RotateCcw, Settings2, Sparkles, Sun, Trash2, X };
+const lucideIcons = { Bell, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, Copy, Download, DownloadCloud, ExternalLink, FolderOpen, Globe, Lightbulb, Moon, MonitorPlay, Pencil, Pipette, Plus, RefreshCw, RotateCw, RotateCcw, Settings2, Sparkles, Sun, Trash2, X };
 let discoverControl: ReturnType<typeof initDiscover> | null = null;
 
 function iconPlaceholder(name: string): HTMLElement {
@@ -104,6 +106,8 @@ const tracingMainTab = $<HTMLButtonElement>('tracingMainTab');
 const tracingView = $('tracingView');
 let tracingInitialized = false;
 const targetMainTabs = $('targetMainTabs');
+const scrollTargetTabsLeft = $<HTMLButtonElement>('scrollTargetTabsLeft');
+const scrollTargetTabsRight = $<HTMLButtonElement>('scrollTargetTabsRight');
 const targetTabsCount = $('targetTabsCount');
 const targetView = $('targetView');
 const targetViewport = $('targetViewport');
@@ -132,7 +136,7 @@ const isWindows = /Windows/i.test(navigator.userAgent);
 const isMac = /Macintosh|Mac OS X/i.test(navigator.userAgent);
 let downloadToastTimer: ReturnType<typeof setTimeout> | null = null;
 type MainTab = 'home' | 'recorder' | 'target' | 'tracing';
-const MAX_TARGET_TABS = 5;
+let maxTargetTabs: number | null = 5;
 let activeMainTab: MainTab = 'home';
 let activeTargetId: string | null = null;
 let targetTabs: TargetTabInfo[] = [];
@@ -683,17 +687,38 @@ function cycleTargetTab(): void {
   selectTargetTab(targetTabs[nextIndex].id);
 }
 
+function updateTargetTabScroll(): void {
+  scrollTargetTabsLeft.disabled = targetMainTabs.scrollLeft <= 1;
+  scrollTargetTabsRight.disabled = targetMainTabs.scrollLeft + targetMainTabs.clientWidth >= targetMainTabs.scrollWidth - 1;
+}
+
+function revealActiveTargetTab(): void {
+  if (!targetMainTabs.hidden && activeMainTab === 'target') {
+    targetMainTabs.querySelector<HTMLElement>('.target-main-tab.active')?.closest('.target-tab-wrap')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  updateTargetTabScroll();
+}
+
+function scrollTargetTabs(direction: number): void {
+  targetMainTabs.scrollLeft += direction * Math.max(160, targetMainTabs.clientWidth * .75);
+  updateTargetTabScroll();
+}
+
 function renderTargetTabs(state: TargetTabsState): void {
+  const revealTarget = state.active_id !== activeTargetId || state.tabs.length !== targetTabs.length;
+  if (state.max_tabs !== undefined) maxTargetTabs = state.max_tabs;
   targetTabs = state.tabs;
   activeTargetId = state.active_id;
   targetOpen = targetTabs.length > 0;
   const newTargetMainTab = $<HTMLButtonElement>('newTargetMainTab');
-  newTargetMainTab.disabled = targetTabs.length >= MAX_TARGET_TABS;
+  newTargetMainTab.disabled = maxTargetTabs !== null && targetTabs.length >= maxTargetTabs;
   newTargetMainTab.title = newTargetMainTab.disabled
-    ? `Maksimal ${MAX_TARGET_TABS} tab target.`
+    ? `Maksimal ${maxTargetTabs} tab target.`
     : 'Buka tab target baru';
+  const previousScrollLeft = targetMainTabs.scrollLeft;
   targetMainTabs.replaceChildren();
-  targetTabsCount.textContent = `${targetTabs.length}/${MAX_TARGET_TABS}`;
+  targetTabsCount.textContent = maxTargetTabs === null ? `${targetTabs.length} tab` : `${targetTabs.length}/${maxTargetTabs}`;
   targetTabs.forEach((tab, index) => {
     const wrapper = document.createElement('span');
     wrapper.className = 'target-tab-wrap';
@@ -748,11 +773,12 @@ function renderTargetTabs(state: TargetTabsState): void {
     wrapper.append(button, reload, close);
     targetMainTabs.append(wrapper);
   });
+  targetMainTabs.scrollLeft = previousScrollLeft;
   updateOpenTargetButton();
   updateMainNavigation();
   if (activeMainTab === 'target' && activeTargetId) {
     targetMainTitle.textContent = targetTabs.find(tab => tab.id === activeTargetId)?.title || 'Target';
-    setMainTab('target');
+    setMainTab('target', revealTarget);
   }
 }
 
@@ -762,10 +788,12 @@ function updateMainNavigation(): void {
   tracingMainTab.hidden = online;
   $('newTargetMainTab').hidden = !online;
   targetMainTabs.hidden = !online || !targetTabs.length;
+  scrollTargetTabsLeft.hidden = scrollTargetTabsRight.hidden = targetMainTabs.hidden;
   targetTabsCount.hidden = !online || !targetTabs.length;
+  updateTargetTabScroll();
 }
 
-function setMainTab(tab: MainTab): void {
+function setMainTab(tab: MainTab, revealTarget = true): void {
   activeMainTab = tab;
   const showHome = tab === 'home';
   const showTarget = tab === 'target' && targetOpen && Boolean(activeTargetId);
@@ -790,6 +818,7 @@ function setMainTab(tab: MainTab): void {
       button.setAttribute('aria-selected', String(showTarget && target.id === activeTargetId));
     }
   });
+  if (revealTarget) revealActiveTargetTab();
   if (showTarget) targetMainTitle.textContent = targetTabs.find(target => target.id === activeTargetId)?.title || 'Target';
   if (isWindows || isMac) {
     if (showTarget) {
@@ -2170,7 +2199,7 @@ async function openTarget(): Promise<void> {
   } finally {
     openTargetInProgress = false;
     buttons[0].disabled = false;
-    buttons[1].disabled = targetTabs.length >= MAX_TARGET_TABS;
+    buttons[1].disabled = maxTargetTabs !== null && targetTabs.length >= maxTargetTabs;
   }
 }
 
@@ -2244,6 +2273,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   closeTargetMainTab.addEventListener('click', () => closeTarget().catch(error => status(workspaceStatus, errorMessage(error), 'error')));
   window.addEventListener('resize', syncTargetViewBounds);
+  window.addEventListener('resize', revealActiveTargetTab);
+  targetMainTabs.addEventListener('scroll', updateTargetTabScroll);
+  scrollTargetTabsLeft.addEventListener('click', () => scrollTargetTabs(-1));
+  scrollTargetTabsRight.addEventListener('click', () => scrollTargetTabs(1));
   $('openTarget').addEventListener('click', () => openTarget().catch(error => status(workspaceStatus, errorMessage(error), 'error')));
   $('newTargetMainTab').addEventListener('click', () => openTarget().catch(error => status(workspaceStatus, errorMessage(error), 'error')));
   $('closeTarget').addEventListener('click', () => closeTarget().catch(error => status(workspaceStatus, errorMessage(error), 'error')));

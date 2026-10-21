@@ -26,6 +26,25 @@ test('interior training falls back for thin or translucent foreground', () => {
   assert.equal(quantizeFlatInteriors(raster(20,20,(x)=>x===10?[0,0,0,255]:[255,255,255,255]),8,20,20).flatInteriors,false);
   assert.equal(quantizeFlatInteriors(raster(20,20,()=>[200,0,0,180]),8,20,20).flatInteriors,false);
 });
+
+test('Auto recommends the cleaned artwork palette including odd color counts', () => {
+  const p=raster(64,48,(x,y)=>y<6||y>=42||x<6||x>=58?[255,255,255,255]:x===32?[247,180,0,255]:x<32?[255,204,0,255]:[240,156,0,255]);
+  const a=detectAutoSettings(p,64,48);
+  assert.equal(a.options.colors,3);assert.equal(a.detectedColors,3);
+  const simple=raster(48,40,(x,y)=>x===22&&(y===20||y===21)?[240,156,0,255]:x>8&&x<39&&y>7&&y<33?[40,102,73,255]:[255,255,255,255]);
+  const b=detectAutoSettings(simple,48,40);
+  assert.equal(b.options.colors,2);assert.equal(b.detectedColors,2);
+});
+
+test('antialias clusters do not trigger the large shaded artwork preset', () => {
+  const p=raster(48,40,(x,y)=>{
+    const a=Math.max(0,Math.min(1,14-Math.hypot(x+.5-24,y+.5-20)));
+    return [Math.round(255-215*a),Math.round(255-145*a),Math.round(255-200*a),255];
+  });
+  const a=detectAutoSettings(p,48,40,2400);
+  assert.equal(a.detectedColors,2);assert.equal(a.options.colors,2);assert.equal(a.resolution,1024);
+  assert.equal(a.options.minArea,4);assert.equal(a.options.whiteMode,'all');
+});
 test('Auto white policy uses detected colors and honors explicit keep/all preferences', () => {
   const p=raster(64,64,(x,y)=>x>15&&x<48&&y>15&&y<48?[0,0,0,255]:[255,255,255,255]);
   const a=detectAutoSettings(p,64,64); assert.equal(a.detectedColors,2); assert.equal(a.options.whiteMode,'all');

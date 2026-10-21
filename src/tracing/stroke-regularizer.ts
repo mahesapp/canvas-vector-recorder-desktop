@@ -5,7 +5,7 @@ export type StrokePoint = [number, number];
 export type StrokeCurve = { from: StrokePoint; to: StrokePoint; controls?: [StrokePoint, StrokePoint] };
 export interface StrokeFit {
   fit: (points: StrokePoint[], tolerance: number, left: StrokePoint, right: StrokePoint) => StrokeCurve[];
-  compact: (curves: StrokeCurve[], protectedPoints: StrokePoint[]) => StrokeCurve[];
+  compact: (curves: StrokeCurve[], protectedPoints: StrokePoint[], tolerance?: number) => StrokeCurve[];
 }
 const distance2 = (a: StrokePoint, b: StrokePoint) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
 const mix = (a: StrokePoint, b: StrokePoint, t: number): StrokePoint => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];

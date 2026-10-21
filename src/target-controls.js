@@ -129,7 +129,7 @@
   var newTabError = shadow.getElementById('new-tab-error');
   var newTabButton = shadow.getElementById('new-tab');
   newTabButton.appendChild(icon('plus'));
-  var MAX_TABS = 5;
+  var MAX_TABS = tabState.max_tabs === null ? Infinity : (tabState.max_tabs || 5);
 
   function showError(message) { newTabError.textContent = message || ''; }
 
@@ -192,14 +192,15 @@
   function update() {
     var atLimit = (tabState.tabs || []).length >= MAX_TABS;
     newTabButton.disabled = atLimit;
-    newTabButton.title = atLimit ? 'Batas maksimal 5 tab tercapai' : 'Tab baru';
-    newTabButton.setAttribute('aria-label', atLimit ? 'Batas maksimal 5 tab tercapai' : 'Tab baru');
+    newTabButton.title = atLimit ? 'Batas maksimal ' + MAX_TABS + ' tab tercapai' : 'Tab baru';
+    newTabButton.setAttribute('aria-label', newTabButton.title);
     renderTabs();
   }
 
   window.__CVR_SET_TABS__ = function (nextState) {
     if (!nextState || !Array.isArray(nextState.tabs)) return;
     tabState = nextState;
+    if (nextState.max_tabs !== undefined) MAX_TABS = nextState.max_tabs === null ? Infinity : nextState.max_tabs;
     update();
   };
 
@@ -216,7 +217,7 @@
   newTabForm.addEventListener('submit', function (event) {
     event.preventDefault();
     if ((tabState.tabs || []).length >= MAX_TABS) {
-      newTabError.textContent = 'Maksimal 5 tab dapat dibuka dalam satu window.';
+      newTabError.textContent = 'Maksimal ' + MAX_TABS + ' tab dapat dibuka dalam satu window.';
       return;
     }
     var next = validUrl(newTabUrl.value.trim());

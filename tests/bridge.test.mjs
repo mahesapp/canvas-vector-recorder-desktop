@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
+import { Window } from 'happy-dom';
 
 const bridge = await readFile(new URL('../src/recorder-bridge.js', import.meta.url), 'utf8');
 const controls = await readFile(new URL('../src/target-controls.js', import.meta.url), 'utf8');
@@ -302,9 +303,26 @@ test('export settings provide custom ratio fields and persist all user settings'
   assert.match(main, /SETTINGS_STORAGE_KEY/);
 });
 
-test('target controls enforce a five-tab limit', () => {
-  assert.match(controls, /MAX_TABS = 5/);
-  assert.match(controls, /Maksimal 5 tab/);
+test('target controls allow more than five tabs in development and enforce the release limit', async () => {
+  for (const limit of [null, 5]) {
+    const dom = new Window({ url: 'https://example.com' });
+    const calls = [];
+    dom.__CVR_TARGET_TABS__ = { active_id: '0', max_tabs: limit, tabs: Array.from({ length: 5 }, (_, id) => ({ id: String(id), url: 'https://example.com', title: `Tab ${id}` })) };
+    dom.__TAURI_INTERNALS__ = { invoke: async (command, args) => { calls.push({ command, args }); } };
+    try {
+      dom.eval(controls);
+      const shadow = dom.document.querySelector('[data-cvr-target-controls]').shadowRoot;
+      assert.equal(shadow.getElementById('new-tab').disabled, limit === 5);
+      shadow.getElementById('new-tab-url').value = 'https://example.com/sixth';
+      shadow.getElementById('new-tab-form').dispatchEvent(new dom.Event('submit', { cancelable: true }));
+      assert.equal(calls.filter(call => call.command === 'open_target_tab').length, limit === null ? 1 : 0);
+      assert.equal(shadow.getElementById('new-tab-error').textContent, limit === 5 ? 'Maksimal 5 tab dapat dibuka dalam satu window.' : '');
+      dom.__CVR_SET_TABS__({ active_id: '0', tabs: dom.__CVR_TARGET_TABS__.tabs.slice(0, 4) });
+      assert.equal(shadow.getElementById('new-tab').disabled, false);
+    } finally {
+      await dom.happyDOM.close();
+    }
+  }
 });
 
 test('activation screen hides workspace navigation and provides submit feedback', () => {

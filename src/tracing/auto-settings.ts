@@ -1,8 +1,10 @@
-import { perceptualColor, quantize, quantizeFlatInteriors, type TraceOptions } from './engine';
+import { compactPalette, perceptualColor, quantize, quantizeFlatInteriors, type TraceOptions } from './engine';
 import { resolveAutoWhite, type WhiteMode } from './auto-white';
 import { resizeRaster, validateRaster } from './auto-raster';
 
 export interface AutoRecommendation { options: TraceOptions; resolution: number; photographic: boolean; fineDetail: boolean; sparseInk: boolean; detectedColors: number }
+/** Bump when persisted Auto recommendations must be detected again from their source. */
+export const AUTO_PALETTE_REVISION = 1;
 const distance2 = (a: number[], b: number[]) => a.reduce((sum, v, i) => sum + (v - b[i]) ** 2, 0);
 const neighbors = (i: number, w: number, h: number) => [i % w > 0 ? i - 1 : -1, i % w + 1 < w ? i + 1 : -1, i >= w ? i - w : -1, i + w < w * h ? i + w : -1];
 const key = (p: Uint8ClampedArray, i: number) => p[i * 4 + 3] < 128 ? -1 : (p[i * 4] >>> 4) * 256 + (p[i * 4 + 1] >>> 4) * 16 + (p[i * 4 + 2] >>> 4);
@@ -53,7 +55,7 @@ function choosePalette(p: Uint8ClampedArray, w: number, h: number, photographic:
   }
   if (!labs.some(Boolean)) return { limit: 2, size: 0 };
   let best = 2, bestScore = Infinity;
-  for (const count of [2, 4, 6, 8, 12]) {
+  for (const count of photographic ? [2, 4, 6, 8, 12] : [2, 3, 4, 5, 6, 7, 8, 10, 12, 16]) {
     const q = quantize(pixels, count), palette = q.palette.map(perceptualColor);
     let error = 0, missed = 0, isolated = 0, population = 0;
     for (let i = 0; i < sw * sh; i++) {
@@ -66,8 +68,11 @@ function choosePalette(p: Uint8ClampedArray, w: number, h: number, photographic:
     if (score < bestScore) { bestScore = score; best = count; }
   }
   const limit = photographic ? Math.max(8, best) : best;
-  const detected = photographic ? quantize(pixels, limit) : quantizeFlatInteriors(pixels, limit, sw, sh);
-  return { limit, size: detected.palette.length };
+  const detected = photographic ? { ...quantize(pixels, limit), flatInteriors: false } : quantizeFlatInteriors(pixels, limit, sw, sh);
+  // Edge mixtures are not additional artwork colors, including when the small
+  // preview lacks enough stable interiors and falls back to ordinary quantization.
+  if (!photographic) compactPalette(pixels, detected.labels, detected.palette, sw, sh, 0, [], detected.flatInteriors);
+  return { limit: photographic ? limit : Math.max(2, detected.palette.length), size: detected.palette.length };
 }
 
 /** AutoSettingsDetector: retain the source dimensions when analyzing a preview. */

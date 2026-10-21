@@ -74,4 +74,5 @@ export interface TargetTabInfo {
 export interface TargetTabsState {
   active_id: string | null;
   tabs: TargetTabInfo[];
+  max_tabs?: number | null;
 }
