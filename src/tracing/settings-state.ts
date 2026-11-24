@@ -5,7 +5,7 @@ const defaults: AppliedSettings = { options: { colors: 6, tolerance: .8, minArea
 
 export function restoreManualSettings(value: unknown): AppliedSettings {
   const settings = value as AppliedSettings | undefined, o = settings?.options;
-  if (!o || !Number.isInteger(o.colors) || o.colors < 2 || o.colors > 16 || ![.2,.35,.8,1.6].includes(o.tolerance) || ![0,4,12,24].includes(o.minArea) || typeof o.smooth !== 'boolean' || typeof o.removeWhite !== 'boolean' || !['none','background','all'].includes(o.whiteMode ?? '') || ![512,1024,2048].includes(settings!.resolution)) return structuredClone(defaults);
+  if (!o || !Number.isInteger(o.colors) || o.colors < 2 || o.colors > 16 || ![.2,.35,.8,1.6].includes(o.tolerance) || ![0,2,4,12,24].includes(o.minArea) || typeof o.smooth !== 'boolean' || typeof o.removeWhite !== 'boolean' || !['none','background','all'].includes(o.whiteMode ?? '') || ![512,1024,2048].includes(settings!.resolution)) return structuredClone(defaults);
   return { resolution: settings!.resolution, options: { colors: o.colors, tolerance: o.tolerance, minArea: o.minArea, smooth: o.smooth, whiteMode: o.whiteMode, removeWhite: o.whiteMode !== 'none' } };
 }
 

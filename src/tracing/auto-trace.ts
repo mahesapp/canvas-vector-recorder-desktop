@@ -93,8 +93,11 @@ export function traceAutoFinal(pixels: Uint8ClampedArray, width: number, height:
   add({ ...selected, colors: Math.min(6, selected.colors), tolerance: 1.6, minArea: 24 });
   let attempts = 0, firstFailure: unknown, reason: AutoFallback = 'none';
   const refine = (result: TraceResult, metrics: SceneMetrics, options: TraceOptions, fallback: AutoFallback): AutoFinalOutcome => {
-    if (attempts < 4 && options.colors >= 8 && options.colors < 16 && whiteMode(options) === 'background' && options.minArea >= 4 && Math.max(result.width, result.height) <= 1024) {
-      const richer = { ...options, colors: 16 }; attempts++;
+    // Fine-detail previews can merge small highlights into broad background
+    // shades. Suppress single-pixel fragments in the richer candidate, then
+    // require better scene fidelity and bounded edge error before applying it.
+    if (attempts < 4 && options.colors >= 8 && options.colors < 16 && whiteMode(options) === 'background' && Math.max(result.width, result.height) <= 1024) {
+      const richer = { ...options, colors: 16, minArea: options.minArea === 0 ? 2 : options.minArea }; attempts++;
       try {
         const candidate = measuredTrace(pixels, width, height, richer, value => progress?.(90 + Math.floor(value * .04), 'Memeriksa warna…'), runner);
         if (acceptAutoPalette(result, metrics, candidate.result, candidate.metrics)) {

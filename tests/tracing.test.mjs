@@ -108,13 +108,15 @@ test('background white removal preserves enclosed white artwork and legacy all m
 
 test('detail protection retains a coherent two-pixel accent but removes an isolated speck', () => {
   const image = raster(32, 24, (x, y) => (x === 9 || x === 10) && y === 10 || x === 22 && y === 10 ? 2 : 1);
-  const result = traceRaster(image, 32, 24, { ...defaults, minArea: 24 });
-  const paths = readPaths(result.svg);
-  assert.equal(at(paths, 9.5, 10.5), '#143cdc');
-  assert.equal(at(paths, 10.5, 10.5), '#143cdc');
-  assert.equal(at(paths, 22.5, 10.5), '#ffffff');
-  assert.equal(result.diagnostics.protectedDetailPixels, 2);
-  assert.ok(result.colors.length <= defaults.colors);
+  for (const minArea of [2,24]) {
+    const result = traceRaster(image, 32, 24, { ...defaults, minArea });
+    const paths = readPaths(result.svg);
+    assert.equal(at(paths, 9.5, 10.5), '#143cdc');
+    assert.equal(at(paths, 10.5, 10.5), '#143cdc');
+    assert.equal(at(paths, 22.5, 10.5), '#ffffff');
+    assert.equal(result.diagnostics.protectedDetailPixels, 2);
+    assert.ok(result.colors.length <= defaults.colors);
+  }
 });
 
 test('conic fitting recovers rotated ellipses and rejects a rectangular loop', () => {

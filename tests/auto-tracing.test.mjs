@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 import { Worker } from 'node:worker_threads';
+import { gunzipSync } from 'node:zlib';
 
 const modules = new Map();
 async function moduleUrl(name) {
@@ -157,6 +158,30 @@ test('optional refit failure keeps the completed trace, cancellation propagates'
   assert.throws(()=>chooseAutoTrace(stripes(),48,48,defaults,undefined,abort),{name:'AbortError'});
   assert.throws(()=>traceAutoFinal(stripes(),48,48,1024,defaults,defaults,undefined,()=>{throw new Error('Always fails');}),/tidak dapat disederhanakan/);
 });
+test('fine-detail Auto retries a richer palette with minimal cleanup and the same white policy', () => {
+  const selected={...defaults,colors:13,tolerance:.2,minArea:0,whiteMode:'background',removeWhite:true}, calls=[];
+  const output=traceAutoFinal(stripes(),48,48,1024,selected,selected,undefined,(_p,_w,_h,options)=>{
+    calls.push({...options});return boundaryAt(options.colors===16?24:23);
+  });
+  assert.deepEqual(calls,[selected,{...selected,colors:16,minArea:2}]);
+  assert.equal(output.options.colors,16);assert.equal(output.options.minArea,2);
+  assert.equal(output.fallback,'palette');assert.equal(output.attempts,2);
+  assert.ok(output.metrics.error<1e-25);
+});
+test('fine-detail palette retry rejects tied, worse and excessive candidates and preserves cancellation', () => {
+  const selected={...defaults,colors:13,tolerance:.2,minArea:0,whiteMode:'background',removeWhite:true};
+  for(const candidate of [boundaryAt(23),boundaryAt(22),{...boundaryAt(24),segments:13000}]) {
+    const output=traceAutoFinal(stripes(),48,48,1024,selected,selected,undefined,(_p,_w,_h,o)=>o.colors===16?candidate:boundaryAt(23));
+    assert.equal(output.options.colors,13);assert.equal(output.fallback,'none');assert.equal(output.attempts,2);
+  }
+  const preserved=traceAutoFinal(stripes(),48,48,1024,selected,selected,undefined,(_p,_w,_h,o)=>{
+    if(o.colors===16)throw new Error('Optional palette failed');return boundaryAt(23);
+  });
+  assert.equal(preserved.options.colors,13);
+  assert.throws(()=>traceAutoFinal(stripes(),48,48,1024,selected,selected,undefined,(_p,_w,_h,o)=>{
+    if(o.colors===16){const error=new Error('Cancelled');error.name='AbortError';throw error;}return boundaryAt(23);
+  }),{name:'AbortError'});
+});
 test('production Auto pipeline reports applied settings and monotonic progress through completion', () => {
   const pixels=raster(48,48,(x,y)=>x>=12&&x<36&&y>=12&&y<36?black:white), progress=[];
   let recommendation;
@@ -174,6 +199,20 @@ test('Auto retains the user sparkle fixture as an editable vector', async () => 
   assert.ok(output.result.paths>=2); assert.doesNotMatch(output.result.svg,/NaN|Infinity|<image/);
   assert.ok(output.auto.options.colors>=2 && output.auto.options.colors<=16);
   assert.equal(output.result.width,28); assert.equal(output.result.height,28);
+});
+test('user glossy icon retains white highlights with measured palette recovery and bounded fragments', async () => {
+  const bytes=gunzipSync(await readFile(new URL('./fixtures/glossy-icon-source.rgba.gz',import.meta.url)));
+  const width=bytes.readUInt32BE(0),height=bytes.readUInt32BE(4),pixels=new Uint8ClampedArray(bytes.subarray(8));
+  const output=traceAuto(pixels,width,height),{result,auto}=output;
+  assert.equal(auto.recommendation.fineDetail,true);assert.equal(auto.options.colors,16);
+  assert.equal(auto.options.minArea,2);assert.equal(auto.options.whiteMode,'background');
+  assert.equal(auto.fallback,'palette');
+  assert.ok(result.colors.some(color=>[1,3,5].every(i=>parseInt(color.slice(i,i+2),16)>=245)), 'source-supported highlights must not merge into the gray background');
+  // Frozen pre-fix pipeline: error .0007269195, edge error .0021672307.
+  assert.ok(auto.error<.0005);assert.ok(auto.edgeError<.0019);
+  assert.ok(result.paths<180);assert.ok(result.segments<1300);
+  assert.equal(result.width,width);assert.equal(result.height,height);
+  assert.doesNotMatch(result.svg,/NaN|Infinity|<image|data:/);
 });
 test('manual trace remains independent of Auto selection', () => {
   const pixels=stripes(32,32);
@@ -229,6 +268,8 @@ test('editor snapshots isolate cached Auto recommendations until copied into cur
   const snapshot=state.manualSettings;snapshot.options.colors=2;assert.equal(state.manualSettings.options.colors,9);
   state.setManual(state.autoSettings);assert.deepEqual(state.manualSettings,{...detected,resolution:1024});
   state.setAuto();assert.equal(state.autoSettings,undefined);
+  const minimal={resolution:1024,options:{...defaults,minArea:2}};
+  const persisted=new TracingSettingsState(minimal);assert.deepEqual(persisted.manualSettings,minimal);
   assert.equal(new TracingSettingsState({resolution:999,options:{...defaults}}).manualSettings.resolution,1024);
   assert.equal(new TracingSettingsState(null).manualSettings.options.colors,6);
 });
