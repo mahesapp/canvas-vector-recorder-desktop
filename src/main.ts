@@ -32,6 +32,7 @@ import {
   createIcons,
 } from 'lucide';
 import { activateLicense, licenseStatus, normalizedEmail } from './license';
+import { evaluateDesktopAppConfig, fetchDesktopAppConfig, isVersionLessThan, type DesktopAppAccessPolicy } from './appConfig';
 import { initDiscover } from './discover';
 import { initRecorderLoader } from './recorder-loader';
 import type { CanvasDetection, LicenseStatus, MicrostockSettings, SvgAsset, SvgResult, StartRecordingResult, TargetTabInfo, TargetTabsState } from './types';
@@ -111,6 +112,20 @@ const updatePromptTitle = $('updatePromptTitle');
 const updatePromptDescription = $('updatePromptDescription');
 const updatePromptCancel = $<HTMLButtonElement>('updatePromptCancel');
 const updatePromptInstall = $<HTMLButtonElement>('updatePromptInstall');
+const appConfigGateView = $('appConfigGateView');
+const appConfigBadge = $('appConfigBadge');
+const appConfigGateTitle = $('appConfigGateTitle');
+const appConfigMessage = $('appConfigMessage');
+const appConfigMeta = $('appConfigMeta');
+const appConfigReleaseNotesWrap = $('appConfigReleaseNotesWrap');
+const appConfigReleaseNotesTitle = $('appConfigReleaseNotesTitle');
+const appConfigReleaseNotesList = $('appConfigReleaseNotesList');
+const appConfigInstallBtn = $<HTMLButtonElement>('appConfigInstallBtn');
+const appConfigInstallLabel = $('appConfigInstallLabel');
+const appConfigManualBtn = $<HTMLButtonElement>('appConfigManualBtn');
+const appConfigRetryBtn = $<HTMLButtonElement>('appConfigRetryBtn');
+const appConfigRetryLabel = $('appConfigRetryLabel');
+const appConfigStatus = $('appConfigStatus');
 const canvasList = $('canvasList');
 const svgList = $('svgList');
 const appVersion = $('appVersion');
@@ -162,7 +177,7 @@ let previewFilenameCanvasId: string | null = null;
 let previewFilenameOverride: string | null = null;
 let filenameOverrides: Record<string, string> = {};
 const ARTWORK_SCALE_MIN = 0.5;
-const ARTWORK_SCALE_MAX = 3;
+const ARTWORK_SCALE_MAX = 5;
 const PREVIEW_ZOOM_MIN = 0.5;
 const PREVIEW_ZOOM_MAX = 4;
 const SETTINGS_STORAGE_KEY = 'canvas-vector-recorder.settings.v1';
@@ -813,6 +828,141 @@ let updateInProgress = false;
 let updateAvailable = false;
 let pendingUpdateInstaller: (() => Promise<void>) | null = null;
 let automaticUpdateTimer: number | null = null;
+const APP_CONFIG_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+let appAccessPolicy: DesktopAppAccessPolicy | null = null;
+let appConfigBusy = false;
+let appConfigManualUrl: string | null = null;
+
+function isAppConfigBlocked(): boolean {
+  return Boolean(appAccessPolicy && appAccessPolicy.status !== 'allowed');
+}
+
+function renderAppConfigGate(): void {
+  const policy = appAccessPolicy;
+  if (!policy || policy.status === 'allowed') {
+    appConfigGateView.hidden = true;
+    return;
+  }
+
+  discoverControl?.setEnabled(false);
+  setAutomaticUpdateChecks(false);
+  landingView.hidden = true;
+  activationView.hidden = true;
+  workspaceView.hidden = true;
+  mainTabs.hidden = true;
+  targetView.hidden = true;
+  appConfigGateView.hidden = false;
+
+  appConfigBadge.textContent = policy.status === 'locked'
+    ? 'Akses Dikunci'
+    : policy.status === 'update_required'
+      ? `Update Wajib · v${policy.latestVersion}`
+      : 'Mode Pemeliharaan';
+  appConfigGateTitle.textContent = policy.title;
+  appConfigMessage.textContent = policy.message;
+
+  if (policy.status === 'locked' && policy.lockUntil) {
+    appConfigMeta.textContent = `Batas waktu: ${policy.lockUntil}`;
+    appConfigMeta.hidden = false;
+  } else if (policy.status === 'maintenance' && policy.endAt) {
+    appConfigMeta.textContent = `Estimasi selesai: ${policy.endAt}`;
+    appConfigMeta.hidden = false;
+  } else {
+    appConfigMeta.hidden = true;
+  }
+
+  if (policy.status === 'update_required' && policy.releaseNotes.length > 0) {
+    appConfigReleaseNotesTitle.textContent = `Catatan Rilis v${policy.latestVersion}`;
+    appConfigReleaseNotesList.replaceChildren(
+      ...policy.releaseNotes.map(note => {
+        const li = document.createElement('li');
+        li.textContent = note;
+        return li;
+      }),
+    );
+    appConfigReleaseNotesWrap.hidden = false;
+  } else {
+    appConfigReleaseNotesWrap.hidden = true;
+  }
+
+  if (policy.status === 'update_required') {
+    appConfigInstallLabel.textContent = updateInProgress
+      ? 'Mengunduh & Menginstal Update…'
+      : `Install Update v${policy.latestVersion} Sekarang`;
+    appConfigInstallBtn.hidden = false;
+    appConfigInstallBtn.disabled = updateInProgress || appConfigBusy;
+    appConfigManualUrl = policy.downloadUrl;
+    appConfigManualBtn.hidden = !policy.downloadUrl;
+  } else {
+    appConfigInstallBtn.hidden = true;
+    appConfigManualUrl = null;
+    appConfigManualBtn.hidden = true;
+  }
+
+  appConfigRetryBtn.disabled = appConfigBusy || updateInProgress;
+  appConfigRetryLabel.textContent = appConfigBusy ? 'Memeriksa Status Server…' : 'Periksa Ulang Status';
+  renderIcons(appConfigGateView);
+}
+
+async function refreshAppConfig(): Promise<void> {
+  if (appConfigBusy) return;
+  const wasBlocked = isAppConfigBlocked();
+  appConfigBusy = true;
+  if (wasBlocked) renderAppConfigGate();
+  try {
+    const config = await fetchDesktopAppConfig();
+    const policy = evaluateDesktopAppConfig(config, packageJson.version);
+    appAccessPolicy = policy;
+    if (policy.status !== 'allowed') {
+      renderAppConfigGate();
+      return;
+    }
+    appConfigGateView.hidden = true;
+    if (isVersionLessThan(packageJson.version, config.update.latestVersion)) {
+      setUpdateAvailable(true);
+    }
+    if (wasBlocked) {
+      await loadLicense();
+    }
+  } catch {
+    // Tetap izinkan pemakaian lokal saat offline jika belum ada status blokir dari server.
+  } finally {
+    appConfigBusy = false;
+    if (isAppConfigBlocked()) renderAppConfigGate();
+  }
+}
+
+async function installRequiredAppConfigUpdate(): Promise<void> {
+  if (updateInProgress) return;
+  updateInProgress = true;
+  status(appConfigStatus, 'Memeriksa paket update…', 'idle', true);
+  renderAppConfigGate();
+  try {
+    const update = await check({ timeout: 15_000 });
+    if (!update) {
+      status(appConfigStatus, 'Paket update belum tersedia untuk platform ini. Coba unduh installer manual.', 'error');
+      return;
+    }
+    let downloadedBytes = 0;
+    await update.downloadAndInstall(event => {
+      if (event.event === 'Started') {
+        downloadedBytes = 0;
+        status(appConfigStatus, 'Menyiapkan download update…', 'idle', true);
+      } else if (event.event === 'Progress') {
+        downloadedBytes += event.data.chunkLength;
+        status(appConfigStatus, `Mengunduh update… ${Math.round(downloadedBytes / 1024)} KB`, 'idle', true);
+      } else if (event.event === 'Finished') {
+        status(appConfigStatus, 'Update berhasil diinstal. Tutup lalu buka ulang aplikasi.', 'success', true);
+      }
+    });
+    setUpdateAvailable(false);
+  } catch (error) {
+    status(appConfigStatus, `Gagal menginstal update: ${errorMessage(error)}`, 'error');
+  } finally {
+    updateInProgress = false;
+    renderAppConfigGate();
+  }
+}
 
 interface UpdateCheckOptions { automatic?: boolean }
 
@@ -1771,6 +1921,10 @@ function scheduleThumbnailRefresh(items: CanvasDetection[]): void {
 }
 
 function renderLicense(s: LicenseStatus): void {
+  if (isAppConfigBlocked()) {
+    renderAppConfigGate();
+    return;
+  }
   if (s.valid) {
     discoverControl?.setEnabled(true);
     landingView.hidden = true;
@@ -2195,6 +2349,17 @@ document.addEventListener('DOMContentLoaded', () => {
   updatePromptCancel.addEventListener('click', () => closeUpdatePrompt(true));
   updatePromptInstall.addEventListener('click', () => { void installPendingUpdate(); });
   updatePrompt.addEventListener('click', event => { if (event.target === updatePrompt) closeUpdatePrompt(true); });
+  appConfigInstallBtn.addEventListener('click', () => { void installRequiredAppConfigUpdate(); });
+  appConfigManualBtn.addEventListener('click', () => {
+    if (!appConfigManualUrl) return;
+    void invoke('open_discover_link', { url: appConfigManualUrl }).catch(error => {
+      status(appConfigStatus, `Gagal membuka tautan: ${errorMessage(error)}`, 'error');
+    });
+  });
+  appConfigRetryBtn.addEventListener('click', () => {
+    status(appConfigStatus, '');
+    void refreshAppConfig();
+  });
   $('mahesLink').addEventListener('click', event => {
     event.preventDefault();
     void invoke('open_mahes_app').catch(error => status(workspaceStatus, errorMessage(error), 'error'));
@@ -2450,6 +2615,11 @@ document.addEventListener('DOMContentLoaded', () => {
   void listen('target-closed', () => { targetOpen = false; activeTargetId = null; renderTargetTabs({ active_id: null, tabs: [] }); updateOpenTargetButton(); currentSession = null; resetDetectedSurfaces(); setMainTab('recorder'); });
   window.addEventListener('beforeunload', persistSettingsSilently);
   window.setTimeout(() => {
-    void loadLicense();
+    void refreshAppConfig().then(() => {
+      if (!isAppConfigBlocked()) void loadLicense();
+    });
+    window.setInterval(() => {
+      void refreshAppConfig();
+    }, APP_CONFIG_CHECK_INTERVAL_MS);
   }, LANDING_DURATION_MS);
 });

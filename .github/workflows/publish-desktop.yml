@@ -94,7 +94,7 @@ jobs:
       - name: Test application
         run: npm test
 
-      - name: Build and publish Tauri release
+      - name: Build and publish GitHub Release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -10,6 +10,37 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const MAHES_APP_URL: &str = "https://mahes.app";
 const DISCOVER_URL: &str = "https://www.mahes.app/api/v1/discover";
+const APP_CONFIG_URL: &str = "https://www.mahes.app/api/v1/apps/cvr/app-config";
+
+#[tauri::command]
+pub async fn get_app_config() -> Result<serde_json::Value, AppError> {
+    let os = match std::env::consts::OS {
+        "macos" => "macos",
+        "windows" => "windows",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => other,
+    };
+    let url = url::Url::parse_with_params(APP_CONFIG_URL, &[("os", os), ("arch", arch)])
+        .map_err(|_| AppError::InvalidUrl)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|error| AppError::Network(error.to_string()))?;
+    client
+        .get(url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|error| AppError::Network(format!("Server App Config tidak dapat dihubungi: {error}")))?
+        .json()
+        .await
+        .map_err(|error| AppError::Network(format!("Respons App Config tidak valid: {error}")))
+}
 
 #[tauri::command]
 pub async fn get_discover() -> Result<serde_json::Value, AppError> {

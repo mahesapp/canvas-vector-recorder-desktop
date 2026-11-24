@@ -1,72 +1,103 @@
-# Panduan Rilis
+# Panduan Rilis Produksi Canvas Vector Recorder Desktop (`RELEASING.md`)
 
-Dokumen ini menjelaskan cara menerbitkan rilis desktop Canvas Vector Recorder melalui GitHub Actions.
+Dokumen ini memuat Standar Operasional Prosedur (SOP) untuk mempublikasikan rilis produksi resmi aplikasi desktop **Canvas Vector Recorder** (Windows NSIS `.exe` & macOS `.dmg` / `.app`) melalui GitHub Actions serta distribusi auto-update melalui **Mahesapp**.
 
-## Hasil rilis
+---
 
-Workflow **Build & publish desktop release** membuat GitHub Release berisi:
+## 1. Sinkronisasi Versi (Wajib di 3 File)
 
-- Installer Windows x64 dalam format NSIS (`.exe`).
-- Bundle macOS Intel dalam format `.dmg` dan `.app`.
-
-Workflow ini menargetkan `x86_64-apple-darwin` pada runner macOS dan `windows-latest` untuk Windows. Rilis juga menyiapkan metadata dan signature update bertanda tangan yang digunakan oleh fitur auto-update desktop aplikasi (`latest.json`).
-
-## Prasyarat satu kali
-
-Pastikan repository GitHub memiliki secrets berikut sebelum menjalankan rilis:
-
-- `LICENSE_PUBLIC_KEY`: Kunci publik lisensi raw base64url, tepat 32 byte (43 karakter tanpa padding). Workflow memvalidasi format dan panjangnya secara otomatis.
-- `TAURI_SIGNING_PRIVATE_KEY`: Private key updater Tauri untuk menandatangani artefak update.
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: Password private key updater (kosongkan jika key tidak menggunakan password).
-
-Public key updater sudah tersimpan di `src-tauri/tauri.conf.json`. Simpan private key dengan aman dan jangan pernah commit private key atau folder keys ke repository.
-
-## Persiapan setiap rilis
-
-1. Perbarui nomor versi ke nilai yang sama di 3 file:
-   - `package.json`
-   - `src-tauri/Cargo.toml`
-   - `src-tauri/tauri.conf.json`
-
-   Perbarui juga `package-lock.json` dan `src-tauri/Cargo.lock` agar versi paket utama tetap sesuai.
-2. Pastikan perubahan rilis sudah masuk ke commit/branch yang akan dirilis.
-3. Jalankan pengujian lokal:
-   ```bash
-   npm test
-   ```
-   Pengujian ini menjalankan typecheck frontend (`tsc --noEmit`), test frontend (`node --test tests/bridge.test.mjs`), dan test Rust (`cargo test`).
-
-Workflow GitHub Actions akan memverifikasi konsistensi ketiga nomor versi tersebut. Untuk pemicu dengan tag, nama tag wajib berformat `v<versi>` (misalnya versi `1.1.9` harus menggunakan tag `v1.1.9`).
-
-## Menjalankan rilis
-
-Pilih salah satu dari dua cara berikut:
-
-### 1. Dengan Git Tag (Direkomendasikan)
-
-Push tag versi ke GitHub:
+Sebelum membuat commit atau tag rilis baru, periksa tag terakhir terlebih dahulu:
 
 ```bash
-git tag v1.1.9
-git push origin v1.1.9
+git tag -l
 ```
 
-Ganti `1.1.9` dengan nomor versi yang telah diselaraskan di ketiga file versi di atas.
+Pastikan nomor versi baru (`x.y.z`, tanpa awalan `v`) ditulis **sama persis** pada ketiga file berikut:
+1. [`package.json`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/package.json) (`"version": "x.y.z"`)
+2. [`src-tauri/Cargo.toml`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/src-tauri/Cargo.toml) (`version = "x.y.z"`)
+3. [`src-tauri/tauri.conf.json`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/src-tauri/tauri.conf.json) (`"version": "x.y.z"`)
 
-### 2. Secara Manual (Workflow Dispatch)
+Perbarui juga `package-lock.json` dan `src-tauri/Cargo.lock` bila perlu agar versi paket utama tetap sesuai.
 
-1. Buka repository GitHub di browser, lalu klik tab **Actions**.
-2. Pilih workflow **Build & publish desktop release**.
-3. Klik tombol **Run workflow**, pilih branch `master`, lalu jalankan.
+> **Penting:** Workflow GitHub Actions (`.github/workflows/publish-desktop.yml`) akan otomatis menggagalkan build apabila salah satu dari ketiga file di atas memiliki versi yang berbeda, atau jika nama tag tidak sesuai dengan `v<version>`.
 
-Pada pemicu manual, workflow akan membaca nomor versi dari file proyek dan membuat/memperbarui release dengan tag `v<versi>`.
+---
 
-## Memeriksa hasil
+## 2. Prasyarat Secrets GitHub
 
-1. Tunggu kedua job matrix (`macOS Intel` dan `Windows x64`) selesai dengan status sukses hijau.
-2. Buka halaman **Releases** di GitHub repository.
-3. Pastikan installer Windows NSIS (`.exe`), bundle macOS (`.dmg`), serta file signature `.sig` dan `latest.json` tersedia.
+Pastikan repository GitHub memiliki secrets berikut sebelum menjalankan rilis:
+- `LICENSE_PUBLIC_KEY`: Kunci publik lisensi raw base64url, tepat 32 byte (43 karakter tanpa padding).
+- `TAURI_SIGNING_PRIVATE_KEY`: Private key updater Tauri (Minisign) untuk menandatangani artefak update.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: Password private key updater (kosongkan jika key tidak menggunakan password).
 
-## Workflow CI
+Public key updater sudah tersimpan di [`src-tauri/tauri.conf.json`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/src-tauri/tauri.conf.json). Jangan pernah commit private key ke repository.
 
-Workflow **Continuous integration** (`ci.yml`) berjalan otomatis pada setiap pull request dan push ke branch `master`. Workflow tersebut menguji typecheck frontend dan test Rust. CI tidak menerbitkan release dan tidak menghasilkan installer aplikasi.
+---
+
+## 3. Validasi & Pengujian Sebelum Rilis
+
+Seluruh pengujian dan build wajib lulus 100% sebelum melakukan commit rilis:
+
+```bash
+# 1. Typecheck, unit test frontend, dan unit test Rust backend
+npm test
+
+# 2. Production frontend bundle
+npm run build
+```
+
+---
+
+## 4. Publikasi Rilis via GitHub Actions
+
+Setelah ketiga file versi disinkronkan dan seluruh pengujian lulus:
+
+```bash
+# 1. Commit perubahan & kenaikan versi
+git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+git commit -m "chore(release): vX.Y.Z"
+git push origin master
+
+# 2. Buat dan push tag rilis (format wajib vX.Y.Z)
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Saat tag `vX.Y.Z` masuk ke GitHub (atau dijalankan manual via **Actions → Build & publish desktop release → Run workflow**), workflow [`.github/workflows/publish-desktop.yml`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/.github/workflows/publish-desktop.yml) akan otomatis:
+1. Memverifikasi konsistensi versi, tag, `LICENSE_PUBLIC_KEY`, dan `TAURI_SIGNING_PRIVATE_KEY`.
+2. Menjalankan pengujian frontend dan Rust di runner CI.
+3. Mem-build installer **Windows x64 NSIS (`.exe`)** dan **macOS Intel (`.dmg` & `.app.tar.gz`)**.
+4. Menandatangani artefak updater dengan `TAURI_SIGNING_PRIVATE_KEY` (Minisign) dan mengunggah seluruh file beserta `.sig` dan `latest.json` ke **GitHub Releases**.
+
+---
+
+## 5. Alur Auto-Update & Distribusi via Mahesapp
+
+Aplikasi Canvas Vector Recorder menggunakan `@tauri-apps/plugin-updater` dan remote App Config yang terhubung ke proxy backend **Mahesapp**:
+- **Endpoint Updater di [`src-tauri/tauri.conf.json`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/src-tauri/tauri.conf.json):**
+  `https://www.mahes.app/api/v1/apps/cvr/app-config?format=tauri`
+- **Endpoint App Config di [`src-tauri/src/commands.rs`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/src-tauri/src/commands.rs) & [`src/appConfig.ts`](file:///d:/Work/Projects/canvas-vector-recorder-desktop/src/appConfig.ts):**
+  `https://www.mahes.app/api/v1/apps/cvr/app-config`
+
+### Cara Kerja Proxy Mahesapp:
+1. **Check Update (`?format=tauri`):**
+   - Server Mahesapp mengambil `latest.json` dari GitHub Releases `mahesapp/canvas-vector-recorder-desktop` di sisi server menggunakan `GITHUB_RELEASE_TOKEN` (sehingga repository GitHub tetap aman meskipun berstatus **Private** dan URL GitHub tidak pernah terlihat oleh pengguna).
+   - Server Mahesapp menyisipkan `release_notes` dari Admin Dashboard Mahesapp dan mengubah seluruh URL download installer menjadi URL proxy Mahesapp (`?download=<target>&version=<version>`).
+   - Jika produk sedang di-*lock* (`is_locked`) atau dalam mode *maintenance* di Admin Mahesapp, endpoint mengembalikan `204 No Content` sehingga update ditahan.
+2. **App Config Gate:**
+   - Saat startup dan setiap 30 menit, aplikasi memeriksa status `is_locked`, `maintenance`, `minimum_version`, dan `update_required` sebelum membuka workspace.
+3. **Download & Auto-Install (`?download=<target>`):**
+   - Saat pengguna menekan **Install** di dalam aplikasi, aplikasi mengunduh stream binary installer melalui server Mahesapp, memverifikasi signature Minisign (`pubkey` di `tauri.conf.json`), dan langsung menginstal pembaruan.
+
+### Checklist di Admin Dashboard Mahesapp Setelah Rilis:
+1. Pastikan variabel environment `GITHUB_RELEASE_TOKEN` aktif di server produksi Mahesapp dan produk `CVR` mengarah ke `mahesapp/canvas-vector-recorder-desktop`.
+2. Buka **Admin → Products → Canvas Vector Recorder (`CVR`) → App Config** di Mahesapp untuk:
+   - Memperbarui `latest_version` dan daftar `release_notes` yang ingin ditampilkan pada dialog konfirmasi update / `AppConfigGate` di aplikasi.
+   - Mengatur `minimum_version` atau `update_required` apabila rilis tersebut bersifat wajib.
+   - Mengunggah file installer ke R2 jika ingin memperbarui link unduhan manual bagi pembeli baru di halaman `/account/downloads`.
+
+---
+
+## 6. Workflow CI
+
+Workflow **Continuous integration** (`ci.yml`) berjalan otomatis pada setiap pull request dan push ke branch `master` untuk menguji typecheck frontend, test frontend, dan test Rust tanpa menerbitkan release.

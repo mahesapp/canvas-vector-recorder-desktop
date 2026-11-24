@@ -49,7 +49,7 @@ fn build_details(asset: &SvgAsset, settings: &MicrostockSettings) -> (String, (u
     const ARTWORK_SAFE_AREA: f64 = 0.90;
     let (width, height, ratio) = artboard(asset.width, asset.height, settings);
     let artwork_scale = if settings.artwork_scale.is_finite() {
-        settings.artwork_scale.clamp(0.5, 3.0)
+        settings.artwork_scale.clamp(0.5, 5.0)
     } else {
         1.0
     };

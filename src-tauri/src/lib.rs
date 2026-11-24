@@ -171,6 +171,7 @@ pub fn run() {
             commands::clear_recording,
             commands::open_target_url,
             commands::open_mahes_app,
+            commands::get_app_config,
             commands::get_discover,
             commands::open_discover_link,
             commands::open_target_tab,

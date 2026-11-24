@@ -457,7 +457,7 @@ pub fn build_canvas_eps(
     let base_scale = ((width as f64 * ARTWORK_SAFE_AREA) / source_width)
         .min((height as f64 * ARTWORK_SAFE_AREA) / source_height);
     let artwork_scale = if settings.artwork_scale.is_finite() {
-        settings.artwork_scale.clamp(0.5, 3.0)
+        settings.artwork_scale.clamp(0.5, 5.0)
     } else {
         1.0
     };
@@ -638,7 +638,7 @@ pub fn build_svg_asset_eps(
     const ARTWORK_SAFE_AREA: f64 = 0.90;
     let (width, height, ratio) = artboard(asset.width, asset.height, settings);
     let artwork_scale = if settings.artwork_scale.is_finite() {
-        settings.artwork_scale.clamp(0.5, 3.0)
+        settings.artwork_scale.clamp(0.5, 5.0)
     } else {
         1.0
     };

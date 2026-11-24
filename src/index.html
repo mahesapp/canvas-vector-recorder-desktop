@@ -67,6 +67,42 @@
       </div>
     </section>
 
+    <section id="appConfigGateView" class="view app-config-shell" role="alertdialog" aria-labelledby="appConfigGateTitle" hidden>
+      <div class="app-config-card">
+        <div class="activation-brand">
+          <img class="brand-icon" src="./assets/brand/recorder-brand.svg" alt="">
+          <div class="app-config-heading-group">
+            <div class="app-config-eyebrow-row">
+              <span class="eyebrow">CANVAS VECTOR RECORDER</span>
+              <span id="appConfigBadge" class="app-config-badge"></span>
+            </div>
+            <h1 id="appConfigGateTitle">Memeriksa Status</h1>
+          </div>
+        </div>
+        <p id="appConfigMessage" class="app-config-message"></p>
+        <p id="appConfigMeta" class="app-config-meta" hidden></p>
+        <div id="appConfigReleaseNotesWrap" class="app-config-notes" hidden>
+          <p id="appConfigReleaseNotesTitle" class="app-config-notes-title"></p>
+          <ul id="appConfigReleaseNotesList" class="app-config-notes-list"></ul>
+        </div>
+        <div class="app-config-actions">
+          <button id="appConfigInstallBtn" class="primary" type="button" hidden>
+            <i data-lucide="download" aria-hidden="true"></i>
+            <span id="appConfigInstallLabel">Install Update Sekarang</span>
+          </button>
+          <button id="appConfigManualBtn" type="button" hidden>
+            <i data-lucide="external-link" aria-hidden="true"></i>
+            <span>Unduh Installer Manual</span>
+          </button>
+          <button id="appConfigRetryBtn" type="button">
+            <i data-lucide="refresh-cw" aria-hidden="true"></i>
+            <span id="appConfigRetryLabel">Periksa Ulang Status</span>
+          </button>
+        </div>
+        <div id="appConfigStatus" class="status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
     <nav id="mainTabs" class="main-tabs" aria-label="Halaman utama" hidden>
       <button id="recorderMainTab" class="main-tab active" type="button" aria-selected="true">
         <i data-lucide="monitor-play" aria-hidden="true"></i><span>Recorder</span>
@@ -197,7 +233,7 @@
                     <span>Atur ukuran aset</span>
                     <output id="artworkScaleValue" aria-live="polite">100%</output>
                   </div>
-                  <input id="artworkScaleSlider" type="range" min="0.5" max="3" step="0.1" value="1"
+                  <input id="artworkScaleSlider" type="range" min="0.5" max="5" step="0.1" value="1"
                     aria-label="Atur ukuran aset">
                 </div>
                 <div class="background-settings">

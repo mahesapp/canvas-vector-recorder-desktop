@@ -267,7 +267,7 @@ fn build_details(data: &CanvasResult, settings: &MicrostockSettings) -> (String,
     let base_scale = ((width as f64 * ARTWORK_SAFE_AREA) / source_width)
         .min((height as f64 * ARTWORK_SAFE_AREA) / source_height);
     let artwork_scale = if settings.artwork_scale.is_finite() {
-        settings.artwork_scale.clamp(0.5, 3.0)
+        settings.artwork_scale.clamp(0.5, 5.0)
     } else {
         1.0
     };

@@ -253,6 +253,7 @@ test('preview provides artwork scale controls used by SVG settings', () => {
   assert.match(main, /previewZoomSlider/);
   assert.match(index, /id="resetPreview"/);
   assert.match(index, /id="previewZoomSlider"[^>]*max="4"/);
+  assert.match(index, /id="artworkScaleSlider"[^>]*max="5"/);
   assert.match(main, /setPreviewZoomValue\(previewZoom - event\.deltaY \* 0\.001\)/);
   assert.match(main, /resetPreviewView/);
   assert.match(main, /draggable="false"/);
@@ -384,15 +385,17 @@ test('workspace updater uses signed Tauri releases', () => {
   assert.equal(tauriConfig.bundle.createUpdaterArtifacts, true);
   assert.equal(typeof tauriConfig.plugins.updater.pubkey, 'string');
   assert.ok(tauriConfig.plugins.updater.pubkey.length > 40);
-  assert.match(tauriConfig.plugins.updater.endpoints[0], /github\.com\/yudafhd\/canvas-vector-recorder-desktop/);
+  assert.match(tauriConfig.plugins.updater.endpoints[0], /https:\/\/www\.mahes\.app\/api\/v1\/apps\/cvr\/app-config\?format=tauri/);
   assert.deepEqual(desktopCapability.permissions, ['updater:default']);
   assert.match(index, /id="checkForUpdates"/);
   assert.match(index, /id="updateIndicator" class="update-indicator"/);
   assert.match(index, /id="updatePrompt"/);
   assert.match(index, /id="updatePromptInstall"/);
+  assert.match(index, /id="appConfigGateView"/);
   assert.match(styles, /\.update-indicator[\s\S]*border-radius: 50%/);
   assert.match(styles, /\.update-prompt \{ position: fixed;/);
   assert.match(main, /from '@tauri-apps\/plugin-updater'/);
+  assert.match(main, /from '\.\/appConfig'/);
   assert.match(main, /downloadAndInstall/);
   assert.match(main, /function showUpdatePrompt/);
   assert.match(main, /function installPendingUpdate/);
@@ -401,6 +404,8 @@ test('workspace updater uses signed Tauri releases', () => {
   assert.doesNotMatch(main, /window\.confirm/);
   assert.match(main, /setUpdateAvailable\(true\)/);
   assert.match(main, /Belum ada release updater yang dipublish di GitHub/);
+  assert.match(commands, /pub async fn get_app_config/);
+  assert.match(permissions, /"get_app_config"/);
 });
 
 test('workspace checks for releases periodically', () => {
