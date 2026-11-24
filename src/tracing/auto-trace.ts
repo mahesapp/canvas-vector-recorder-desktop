@@ -1,8 +1,10 @@
 import { resolveAutoWhite, type WhiteMode } from './auto-white';
-import { traceRaster, type TraceOptions, type TraceResult } from './engine';
+import { quantize, traceRaster, type TraceOptions, type TraceResult } from './engine';
 import { resizeRaster, validateRaster } from './auto-raster';
 import { detectAutoSettings, recommendAutoSettings, type AutoRecommendation } from './auto-settings';
-import { evaluateSvgScene, SCENE_TILE, type SceneMetrics } from './scene-quality';
+import { evaluateSvgScene, sceneAllows, SCENE_TILE, type SceneMetrics } from './scene-quality';
+import { compressionNoise, twoToneEvidence } from './source-analysis';
+import { findSceneDefects } from './scene-defects';
 
 export type TraceProgress = (value: number, label: string) => void;
 export type TraceRunner = (pixels: Uint8ClampedArray, width: number, height: number, options: TraceOptions, progress?: TraceProgress) => TraceResult;
@@ -12,14 +14,21 @@ export interface AutoFinalOutcome { result: TraceResult; options: TraceOptions; 
 export interface AutoTraceInfo { recommendation: AutoRecommendation; selection: AutoSelection; options: TraceOptions; resolution: number; attempts: number; fallback: AutoFallback; error: number; edgeError: number }
 export interface AutoTraceOutcome { result: TraceResult; auto: AutoTraceInfo }
 const whiteMode = (options: TraceOptions) => options.whiteMode ?? (options.removeWhite ? 'all' : 'none');
-const same = (a: TraceOptions, b: TraceOptions) => a.colors === b.colors && a.tolerance === b.tolerance && a.minArea === b.minArea && a.smooth === b.smooth && whiteMode(a) === whiteMode(b);
+const same = (a: TraceOptions, b: TraceOptions) => a.colors === b.colors && a.tolerance === b.tolerance && a.minArea === b.minArea && a.smooth === b.smooth && whiteMode(a) === whiteMode(b) && !!a.noiseCleanup === !!b.noiseCleanup && !!a.localRefinement === !!b.localRefinement && (a.geometry !== false) === (b.geometry !== false) && (a.pixelArt !== false) === (b.pixelArt !== false) && (a.gradients !== false) === (b.gradients !== false);
 const cancelled = (error: unknown) => error instanceof Error && error.name === 'AbortError';
 
-export function autoCandidates(base: TraceOptions): TraceOptions[] {
+export function autoCandidates(base: TraceOptions, evidence?: { twoTone: boolean; sourceNoisy: boolean }): TraceOptions[] {
   const choices = [{ ...base }], less = Math.max(2, base.colors - (base.colors <= 4 ? 1 : 2)), more = Math.min(16, base.colors + (base.colors >= 12 ? 2 : 3));
   if (less !== base.colors) choices.push({ ...base, colors: less, tolerance: base.tolerance < .8 ? .8 : 1.6, minArea: base.minArea < 4 ? 4 : base.minArea < 12 ? 12 : 24 });
   if (more !== base.colors) choices.push({ ...base, colors: more, tolerance: base.tolerance > .8 ? .8 : .35, minArea: base.minArea > 12 ? 12 : base.minArea > 4 ? 4 : 0 });
+  const add = (option: TraceOptions) => { if (!choices.some(o => same(o, option))) choices.push(option); };
+  if (base.smooth && evidence?.twoTone) add({ ...base, colors: 2, tolerance: Math.min(.35, base.tolerance), minArea: 0, noiseCleanup: false });
+  if (base.smooth && evidence?.sourceNoisy) add({ ...base, noiseCleanup: true });
   return choices;
+}
+
+function sourceCandidates(pixels: Uint8ClampedArray, width: number, height: number, base: TraceOptions) {
+  return autoCandidates(base, { twoTone: twoToneEvidence(pixels, width, height, quantize(pixels, 2).palette), sourceNoisy: compressionNoise(pixels, width, height).detected });
 }
 
 export function autoScore(result: TraceResult, metrics: SceneMetrics) {
@@ -39,15 +48,19 @@ const measuredTrace = (pixels: Uint8ClampedArray, w: number, h: number, options:
 export function chooseAutoTrace(pixels: Uint8ClampedArray, width: number, height: number, suggested: TraceOptions, progress?: TraceProgress, runner: TraceRunner = traceRaster): AutoSelection {
   validateRaster(pixels, width, height);
   if (Math.max(width, height) > 192) throw new Error('Ukuran pratinjau Auto tidak valid.');
-  const choices = autoCandidates(suggested);
-  let best: AutoSelection | undefined, firstFailure: unknown, succeeded = 0, baselineScore: number | null = null, baselineError = NaN;
+  const choices = sourceCandidates(pixels, width, height, suggested);
+  let best: AutoSelection | undefined, firstFailure: unknown, succeeded = 0, baselineScore: number | null = null, baselineError = NaN, baselineMetrics: SceneMetrics | undefined;
+  const ordinary = autoCandidates(suggested).length;
   for (let i = 0; i < choices.length; i++) {
     try {
       const { result, metrics } = measuredTrace(pixels, width, height, choices[i], (value) => progress?.(Math.round(30 * (i + value / 100) / choices.length), 'Analisis gambar…'), runner);
       const score = autoScore(result, metrics); if (!Number.isFinite(score)) throw new Error('Kualitas tracing tidak valid.');
       succeeded++;
-      if (i === 0) { baselineScore = score; baselineError = metrics.error; }
-      if (!best || score < best.score * .98 && (Number.isNaN(baselineError) || metrics.error <= baselineError * 1.08 + 1e-5)) best = { options: choices[i], attempted: choices.length, succeeded, index: i, score, baselineScore };
+      if (i === 0) { baselineScore = score; baselineError = metrics.error; baselineMetrics = metrics; }
+      // Source-specific cleanup must earn its reduction without spending the
+      // ordinary palette selector's fidelity allowance on lost detail.
+      const safe = i < ordinary || !baselineMetrics || metrics.error <= baselineMetrics.error + 1e-9 && sceneAllows(baselineMetrics, metrics);
+      if (safe && (!best || score < best.score * .98 && (Number.isNaN(baselineError) || metrics.error <= baselineError * 1.08 + 1e-5))) best = { options: choices[i], attempted: choices.length, succeeded, index: i, score, baselineScore };
     } catch (error) { if (cancelled(error)) throw error; if (i === 0) firstFailure = error; }
     progress?.(Math.round(30 * (i + 1) / choices.length), 'Analisis gambar…');
   }
@@ -87,12 +100,17 @@ export function traceAutoFinal(pixels: Uint8ClampedArray, width: number, height:
   validateRaster(pixels, width, height);
   const choices: TraceOptions[] = [];
   const add = (option: TraceOptions) => { if (!choices.some(o => same(o, option))) choices.push(option); };
-  add(selected);
+  // A preview can erase a tiny third-color accent. Recheck the full working
+  // raster before a preview-only two-ink approximation can reach export.
+  const rejectedTwoTone = selected.colors === 2 && suggested.colors > 2 && !twoToneEvidence(pixels, width, height, quantize(pixels, 2).palette);
+  if (!rejectedTwoTone) add(selected);
   if (!same(selected, suggested)) add(suggested);
   else add({ ...selected, colors: Math.min(selected.colors, Math.max(2, suggested.colors - 2)), tolerance: 1.6, minArea: Math.max(12, selected.minArea) });
-  add({ ...selected, colors: Math.min(6, selected.colors), tolerance: 1.6, minArea: 24 });
-  let attempts = 0, firstFailure: unknown, reason: AutoFallback = 'none';
+  const fallbackBase = rejectedTwoTone ? suggested : selected;
+  add({ ...fallbackBase, colors: Math.min(6, fallbackBase.colors), tolerance: 1.6, minArea: 24 });
+  let attempts = 0, firstFailure: unknown, reason: AutoFallback = rejectedTwoTone ? 'quality' : 'none';
   const refine = (result: TraceResult, metrics: SceneMetrics, options: TraceOptions, fallback: AutoFallback): AutoFinalOutcome => {
+    let refitFailed = false;
     if (attempts < 4 && options.colors >= 8 && options.colors < 16 && whiteMode(options) === 'background' && options.minArea >= 4 && Math.max(result.width, result.height) <= 1024) {
       const richer = { ...options, colors: 16 }; attempts++;
       try {
@@ -110,7 +128,16 @@ export function traceAutoFinal(pixels: Uint8ClampedArray, width: number, height:
         const candidate = measuredTrace(pixels, width, height, detailed, value => progress?.(94 + pass * 2 + Math.floor(value * .02), 'Merapikan detail…'), runner);
         if (!acceptAutoDetail(result, metrics, candidate.result, candidate.metrics)) break;
         result = candidate.result; metrics = candidate.metrics; options = detailed; if (fallback === 'none') fallback = 'detail';
-      } catch (error) { if (cancelled(error)) throw error; break; }
+      } catch (error) { if (cancelled(error)) throw error; refitFailed = true; break; }
+    }
+    if (!refitFailed && !options.localRefinement && options.smooth && options.tolerance >= .35 && metrics.edgeError > 1e-5 && result.width * result.height >= 4096 && result.width * result.height <= 1024 ** 2 && result.segments <= 6000 && attempts < 5 && findSceneDefects(metrics, result.width, result.height).length) {
+      const local = { ...options, localRefinement: true }; attempts++;
+      try {
+        const candidate = measuredTrace(pixels, width, height, local, value => progress?.(98 + Math.floor(value * .01), 'Memeriksa detail...'), runner);
+        if (candidate.result.diagnostics.localRefitAccepted && acceptAutoDetail(result, metrics, candidate.result, candidate.metrics)) {
+          result = candidate.result; metrics = candidate.metrics; options = local; if (fallback === 'none') fallback = 'detail';
+        }
+      } catch (error) { if (cancelled(error)) throw error; }
     }
     progress?.(100, 'Selesai'); return { result, metrics, options, resolution, attempts, fallback };
   };
@@ -119,14 +146,15 @@ export function traceAutoFinal(pixels: Uint8ClampedArray, width: number, height:
       attempts++;
       const trace = measuredTrace(pixels, width, height, choices[i], (value, label) => progress?.(i === 0 ? Math.min(75, Math.round(value * .75)) : 75 + Math.round((i - 1 + value / 100) * 15 / Math.max(1, choices.length - 1)), i === 0 ? label : 'Menghaluskan hasil…'), runner);
       if (!excessiveAutoTrace(trace.result, trace.metrics)) {
-        if (i === 0 && !same(selected, suggested)) {
+        if (i === 0 && !rejectedTwoTone && !same(selected, suggested)) {
           try {
             attempts++;
             const baseline = measuredTrace(pixels, width, height, suggested, value => progress?.(75 + Math.round(value * .15), 'Memeriksa detail…'), runner);
-            if (!excessiveAutoTrace(baseline.result, baseline.metrics) && (autoScore(trace.result, trace.metrics) >= autoScore(baseline.result, baseline.metrics) * .98 || trace.metrics.error > baseline.metrics.error * 1.2 + .0001)) return refine(baseline.result, baseline.metrics, suggested, 'quality');
+            const specialized = choices[i].noiseCleanup || choices[i].colors === 2 && suggested.colors > 2;
+            if (!excessiveAutoTrace(baseline.result, baseline.metrics) && (autoScore(trace.result, trace.metrics) >= autoScore(baseline.result, baseline.metrics) * .98 || trace.metrics.error > baseline.metrics.error * 1.2 + .0001 || specialized && (trace.metrics.error > baseline.metrics.error + 1e-9 || !sceneAllows(baseline.metrics, trace.metrics)))) return refine(baseline.result, baseline.metrics, suggested, 'quality');
           } catch (error) { if (cancelled(error)) throw error; }
         }
-        return refine(trace.result, trace.metrics, choices[i], i === 0 ? 'none' : reason);
+        return refine(trace.result, trace.metrics, choices[i], i === 0 && !rejectedTwoTone ? 'none' : reason);
       }
       reason = 'complexity';
     } catch (error) { if (cancelled(error)) throw error; firstFailure ??= error; if (reason === 'none') reason = 'traceError'; }
@@ -163,7 +191,7 @@ export function traceAuto(pixels: Uint8ClampedArray, width: number, height: numb
   catch (error) {
     if (cancelled(error)) throw error;
     // A failed preview must not prevent the bounded final-resolution retries.
-    selection = { options: suggested, attempted: autoCandidates(suggested).length, succeeded: 0, index: -1, score: Infinity, baselineScore: null };
+    selection = { options: suggested, attempted: sourceCandidates(preview.pixels, preview.width, preview.height, suggested).length, succeeded: 0, index: -1, score: Infinity, baselineScore: null };
   }
   const outcome = traceAutoFinal(raster.pixels, raster.width, raster.height, recommendation.resolution, selection.options, suggested, (value, label) => report(30 + Math.round(value * .7), label), runner);
   return { result: outcome.result, auto: { recommendation, selection, options: outcome.options, resolution: outcome.resolution, attempts: outcome.attempts, fallback: outcome.fallback, error: outcome.metrics.error, edgeError: outcome.metrics.edgeError } };

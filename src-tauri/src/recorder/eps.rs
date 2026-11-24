@@ -745,7 +745,13 @@ pub fn build_svg_asset_eps(
                     }
 
                     if let Some(clip_ps) = clip_ps { eps.push_str(&clip_ps); }
-                    if let Some((r, g, b)) = parse_color_rgb(&fill) {
+                    if fill.starts_with("url(") {
+                        if let Ok(Some(shading)) = super::gradient::shading(&document, &fill) {
+                            eps.push_str("gsave\nnewpath\n");eps.push_str(&path_ps);
+                            eps.push_str(if fill_rule=="evenodd" { "eoclip\nnewpath\n" } else { "clip\nnewpath\n" });
+                            eps.push_str(&shading);eps.push_str("grestore\n");
+                        }
+                    } else if let Some((r, g, b)) = parse_color_rgb(&fill) {
                         eps.push_str(&format!("{} {} {} setrgbcolor\n", f(r), f(g), f(b)));
                         eps.push_str("newpath\n");
                         eps.push_str(&path_ps);
@@ -957,7 +963,13 @@ pub fn build_tracing_eps(svg: &str, title: &str) -> Result<Vec<u8>, crate::AppEr
                 let fill = get_attr("fill").unwrap_or_else(|| "#000000".into());
                 let fill_rule = get_attr("fill-rule").unwrap_or_else(|| "nonzero".into());
 
-                if let Some((r, g, b)) = parse_color_rgb(&fill) {
+                if let Some(shading) = super::gradient::shading(&document, &fill)? {
+                    eps.push_str("gsave\n");
+                    if let Some(clip_ps) = svg_clip_postscript(&document, path)? { eps.push_str(&clip_ps); }
+                    eps.push_str("newpath\n");eps.push_str(&path_ps);
+                    eps.push_str(if fill_rule=="evenodd" { "eoclip\nnewpath\n" } else { "clip\nnewpath\n" });
+                    eps.push_str(&shading);eps.push_str("grestore\n");
+                } else if let Some((r, g, b)) = parse_color_rgb(&fill) {
                     eps.push_str("gsave\n");
                     if let Some(clip_ps) = svg_clip_postscript(&document, path)? { eps.push_str(&clip_ps); }
                     eps.push_str(&format!("{} {} {} setrgbcolor\n", f(r), f(g), f(b)));

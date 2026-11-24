@@ -416,6 +416,8 @@ pub(crate) fn validate_tracing_svg(svg: &str) -> Result<(), AppError> {
     }
     let mut clips = std::collections::HashSet::new();
     let mut references = Vec::new();
+    let mut gradients = std::collections::HashSet::new();
+    let mut gradient_references = Vec::new();
     for node in root.descendants().filter(|node| node.is_element()) {
         if node.tag_name().namespace() != Some("http://www.w3.org/2000/svg") {
             return Err(AppError::InvalidEvent("Namespace SVG tidak diizinkan".into()));
@@ -424,18 +426,23 @@ pub(crate) fn validate_tracing_svg(svg: &str) -> Result<(), AppError> {
             "svg" if node == root => &["width", "height", "viewBox"],
             "defs" if node.parent_element() == Some(root) => &[],
             "clipPath" if node.parent_element().is_some_and(|p| p.has_tag_name("defs")) => &["id", "clipPathUnits"],
+            "linearGradient" if node.parent_element().is_some_and(|p| p.has_tag_name("defs")) => &["id", "gradientUnits", "x1", "y1", "x2", "y2"],
+            "radialGradient" if node.parent_element().is_some_and(|p| p.has_tag_name("defs")) => &["id", "gradientUnits", "cx", "cy", "r"],
+            "stop" if node.parent_element().is_some_and(|p| matches!(p.tag_name().name(), "linearGradient" | "radialGradient")) => &["offset", "stop-color"],
             "path" if node.parent_element() == Some(root) => &["fill", "fill-rule", "d", "clip-path"],
             "path" if node.parent_element().is_some_and(|p| p.has_tag_name("clipPath")) => &["clip-rule", "d"],
             _ => return Err(AppError::InvalidEvent("Elemen SVG tracing tidak diizinkan".into())),
         };
         for attribute in node.attributes() {
             if attribute.namespace().is_some() || !allowed.contains(&attribute.name())
-                || (attribute.name() != "clip-path" && attribute.value().contains("url(")) {
+                || (!matches!(attribute.name(), "clip-path" | "fill") && attribute.value().contains("url(")) {
                 return Err(AppError::InvalidEvent("Atribut SVG tracing tidak diizinkan".into()));
             }
             if attribute.name() == "fill" {
                 let color = attribute.value();
-                if color.len() != 7 || !color.starts_with('#') || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                if let Some(id) = color.strip_prefix("url(#").and_then(|v| v.strip_suffix(')')).filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b,b'-'|b'_'))) {
+                    gradient_references.push(id);
+                } else if color.len() != 7 || !color.starts_with('#') || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()) {
                     return Err(AppError::InvalidEvent("Warna SVG tracing tidak valid".into()));
                 }
             }
@@ -443,10 +450,17 @@ pub(crate) fn validate_tracing_svg(svg: &str) -> Result<(), AppError> {
         if node.has_tag_name("clipPath") {
             let id = node.attribute("id").unwrap_or("");
             if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-                || !clips.insert(id) || node.attribute("clipPathUnits").is_some_and(|v| v != "userSpaceOnUse")
+                || gradients.contains(id) || !clips.insert(id) || node.attribute("clipPathUnits").is_some_and(|v| v != "userSpaceOnUse")
                 || !node.children().any(|child| child.is_element()) {
                 return Err(AppError::InvalidEvent("Definisi clip tracing tidak valid".into()));
             }
+        }
+        if matches!(node.tag_name().name(), "linearGradient" | "radialGradient") {
+            let id=node.attribute("id").unwrap_or("");
+            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b,b'-'|b'_')) || clips.contains(id) || !gradients.insert(id) {
+                return Err(AppError::InvalidEvent("Definisi gradasi tracing tidak valid".into()));
+            }
+            recorder::gradient::parse(node)?;
         }
         if node.has_tag_name("path") && node.parent_element().is_some_and(|p| p.has_tag_name("clipPath")) {
             if node.attribute("clip-rule").is_some_and(|v| v != "nonzero")
@@ -464,12 +478,39 @@ pub(crate) fn validate_tracing_svg(svg: &str) -> Result<(), AppError> {
     if references.iter().any(|id| !clips.contains(id)) {
         return Err(AppError::InvalidEvent("Clip tracing tidak tersedia".into()));
     }
+    if gradient_references.iter().any(|id| !gradients.contains(id)) {
+        return Err(AppError::InvalidEvent("Gradasi tracing tidak tersedia".into()));
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tracing_export_tests {
     use super::validate_tracing_svg;
+
+    #[test]
+    fn gradients_survive_native_svg_and_eps_export_with_local_clipping() {
+        let source=r##"<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="8" y2="0"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient><clipPath id="c" clipPathUnits="userSpaceOnUse"><path clip-rule="nonzero" d="M0 0L8 0L8 8L0 8Z"/></clipPath></defs><path fill="url(#g)" clip-path="url(#c)" fill-rule="evenodd" d="M0 0L8 0L8 8L0 8ZM2 2L6 2L6 6L2 6Z"/></svg>"##;
+        assert!(validate_tracing_svg(source).is_ok());
+        let settings=crate::recorder::validator::MicrostockSettings::default();
+        let svg=super::render_tracing_export(source.into(),settings.clone(),"svg".into(),"gradient".into()).unwrap();
+        let eps=super::render_tracing_export(source.into(),settings,"eps".into(),"gradient".into()).unwrap();
+        assert!(svg.contains("<linearGradient"));assert!(svg.contains("fill=\"url(#g)\""));
+        assert!(eps.contains("/ShadingType 2"));assert!(eps.contains("/Coords [0 0 8 0]"));assert!(eps.contains("eoclip\nnewpath\n"));assert!(eps.contains("shfill"));
+        let raw=crate::recorder::eps::build_tracing_eps(source,"gradient").unwrap();
+        assert!(String::from_utf8_lossy(&raw).contains("/ShadingType 2"));
+    }
+
+    #[test]
+    fn gradients_reject_external_missing_duplicate_and_malformed_definitions() {
+        let wrap=|body:&str|format!(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8">{body}</svg>"#);
+        let defs=r##"<defs><radialGradient id="g" gradientUnits="userSpaceOnUse" cx="4" cy="4" r="4"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></radialGradient></defs>"##;
+        let path=r##"<path fill="url(#g)" d="M0 0L8 0L8 8Z"/>"##;
+        assert!(validate_tracing_svg(&wrap(&format!("{defs}{path}"))).is_ok());
+        for bad in [path.to_string(),format!("{defs}{defs}{path}"),format!("{defs}{}",path.replace("url(#g)","url(https://example.com/g)")),format!("{defs}{}",path.replace("url(#g)","url(#missing)")),format!("{}{path}",defs.replace("r=\"4\"","r=\"NaN\"")),format!("{}{path}",defs.replace("offset=\"1\"","offset=\"0\"")),format!("{}{path}",defs.replace("userSpaceOnUse","objectBoundingBox")),format!("{}{path}",defs.replace("<stop ","<stop onload=\"alert(1)\" "))] {
+            assert!(validate_tracing_svg(&wrap(&bad)).is_err(),"{bad}");
+        }
+    }
 
     #[test]
     fn clipped_underpaint_survives_export_layout_and_batch() {

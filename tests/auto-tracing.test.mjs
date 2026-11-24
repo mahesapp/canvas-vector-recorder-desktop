@@ -78,14 +78,15 @@ test('scene evaluator matches exact layers, even-odd holes, alpha and intentiona
 test('selector keeps baseline ties and rejects lost edges even for a simpler SVG', () => {
   const pixels=stripes(); let calls=0;
   const selected=chooseAutoTrace(pixels,48,48,defaults,undefined,()=>{calls++; return boundaryAt(24);});
-  assert.equal(calls,3); assert.equal(selected.index,0); assert.equal(selected.succeeded,3);
-  const rejected=chooseAutoTrace(pixels,48,48,defaults,undefined,()=>boundaryAt(++calls===4?24:20));
+  assert.equal(calls,4); assert.equal(selected.index,0); assert.equal(selected.succeeded,4);
+  calls=0;
+  const rejected=chooseAutoTrace(pixels,48,48,defaults,undefined,()=>boundaryAt(++calls===1?24:20));
   assert.equal(rejected.index,0);
 });
 test('selector recovers from a failed baseline and chooses a measured improvement', () => {
   let calls=0;
   const result=chooseAutoTrace(stripes(),48,48,defaults,undefined,()=>{if(++calls===1)throw new Error('Preview complex');return boundaryAt(calls===2?23:24);});
-  assert.equal(result.index,2); assert.equal(result.succeeded,2); assert.equal(result.baselineScore,null);
+  assert.equal(result.index,2); assert.equal(result.succeeded,3); assert.equal(result.baselineScore,null);
   assert.throws(()=>chooseAutoTrace(stripes(),48,48,defaults,undefined,()=>{throw new Error('No candidates');}),/No candidates/);
 });
 test('final tracing retries settings, bounds complexity and rechecks the preview winner', () => {

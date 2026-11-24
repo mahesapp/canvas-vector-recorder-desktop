@@ -32,9 +32,9 @@ export async function exportSource(item: BatchItem, s: GlobalExportSettings, run
   if (!item.output) throw new Error('Jalankan tracing terlebih dahulu.');
   const svg = item.output.result.svg;
   const maxColors = s.maxColors ?? exportDefaults.maxColors!;
-  if (new Set(tracingSvgPaths(svg).map(path => path.color.toLowerCase())).size <= maxColors) return svg;
+  if (new Set(tracingSvgPaths(svg).flatMap(path => path.gradient ? path.gradient.stops.map(s=>s.color.toLowerCase()) : [path.color.toLowerCase()])).size <= maxColors) return svg;
   const applied = item.output.auto ?? item.config;
-  const config = { mode: 'manual' as const, resolution: applied.resolution, options: { ...applied.options, colors: maxColors } };
+  const config = { mode: 'manual' as const, resolution: applied.resolution, options: { ...applied.options, colors: maxColors, ...(tracingSvgPaths(svg).some(p=>p.gradient) ? { gradients: false } : {}) } };
   const output = await runner({ ...item, config }, new AbortController().signal, () => {});
   return output.result.svg;
 }

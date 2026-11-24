@@ -1,10 +1,11 @@
 import { compactPalette, perceptualColor, quantize, quantizeFlatInteriors, type TraceOptions } from './engine';
 import { resolveAutoWhite, type WhiteMode } from './auto-white';
 import { resizeRaster, validateRaster } from './auto-raster';
+import { compressionNoise, twoToneEvidence } from './source-analysis';
 
-export interface AutoRecommendation { options: TraceOptions; resolution: number; photographic: boolean; fineDetail: boolean; sparseInk: boolean; detectedColors: number }
+export interface AutoRecommendation { options: TraceOptions; resolution: number; photographic: boolean; fineDetail: boolean; sparseInk: boolean; detectedColors: number; sourceNoisy: boolean; twoTone: boolean }
 /** Bump when persisted Auto recommendations must be detected again from their source. */
-export const AUTO_PALETTE_REVISION = 1;
+export const AUTO_PALETTE_REVISION = 3;
 const distance2 = (a: number[], b: number[]) => a.reduce((sum, v, i) => sum + (v - b[i]) ** 2, 0);
 const neighbors = (i: number, w: number, h: number) => [i % w > 0 ? i - 1 : -1, i % w + 1 < w ? i + 1 : -1, i >= w ? i - w : -1, i + w < w * h ? i + w : -1];
 const key = (p: Uint8ClampedArray, i: number) => p[i * 4 + 3] < 128 ? -1 : (p[i * 4] >>> 4) * 256 + (p[i * 4 + 1] >>> 4) * 16 + (p[i * 4 + 2] >>> 4);
@@ -103,7 +104,9 @@ export function detectAutoSettings(p: Uint8ClampedArray, w: number, h: number, s
     resolution = 2048; colors = 16; tolerance = .8; minArea = 12;
   }
   const whiteMode = resolveAutoWhite(detectedColors, defaultWhite);
-  return { options: { colors, tolerance, minArea, smooth: true, removeWhite: whiteMode !== 'none', whiteMode }, resolution, photographic, fineDetail, sparseInk, detectedColors };
+  const sourceNoisy = compressionNoise(p, w, h).detected;
+  const twoTone = !photographic && twoToneEvidence(p, w, h, quantize(p, 2).palette);
+  return { options: { colors, tolerance, minArea, smooth: true, removeWhite: whiteMode !== 'none', whiteMode }, resolution, photographic, fineDetail, sparseInk, detectedColors, sourceNoisy, twoTone };
 }
 
 export function recommendAutoSettings(pixels: Uint8ClampedArray, width: number, height: number, sourceSide = Math.max(width, height), defaultWhite: WhiteMode = 'background') {

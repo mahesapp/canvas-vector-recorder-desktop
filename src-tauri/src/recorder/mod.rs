@@ -1,6 +1,7 @@
 pub mod canvas;
 mod clear;
 pub mod eps;
+pub mod gradient;
 pub mod events;
 pub mod path;
 pub mod svg;

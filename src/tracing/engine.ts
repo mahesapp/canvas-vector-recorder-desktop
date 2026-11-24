@@ -6,10 +6,16 @@ import { geometricHypot } from './geometry-math';
 import { cleanTransitionMixtures, mergeSmallEdgeRegions, transitionDefaults, type TransitionDiagnostics } from './transition-mixtures';
 import { evaluateSvgScene, sceneAllows } from './scene-quality';
 import { allowsContourCleanup, cleanContour, contourBendEnergy, contourCleanupDefaults, flatArtwork, type ContourCleanupDiagnostics } from './contour-cleanup';
-import { balanceStrokeCurvature, regularizeStroke, fairStrokeCurvature, strokeRoughness, flattenStroke, strokeWithin } from './stroke-regularizer';
-export interface TraceOptions { colors: number; tolerance: number; minArea: number; smooth: boolean; removeWhite: boolean; whiteMode?: 'none' | 'background' | 'all' }
+import { balanceStrokeCurvature, regularizeStroke, fairStrokeCurvature, strokeRoughness, flattenStroke, strokeWithin, strokeSelfIntersects } from './stroke-regularizer';
+import { cohereNoisyLabels, compressionNoise, type SourceDiagnostics } from './source-analysis';
+import { findSceneDefects, localRefinementAllows, type LocalRefinementDiagnostics } from './scene-defects';
+import { fitGeometricPolygon, fitRoundedRectangle, fitCircularArc } from './geometry-shapes';
+import { tracePixelGrid } from './pixel-grid';
+import { traceGradientRegions } from './gradient-trace';
+export interface TraceOptions { colors: number; tolerance: number; minArea: number; smooth: boolean; removeWhite: boolean; whiteMode?: 'none' | 'background' | 'all'; noiseCleanup?: boolean; localRefinement?: boolean; geometry?: boolean; pixelArt?: boolean; gradients?: boolean }
+export interface TraceDiagnostics { geometricShapes?: number; pixelGridCells?: number; gradientRegions?: number; specializedFailures?: number }
 export interface TraceResult { svg: string; colors: string[]; paths: number; contours: number; segments: number; width: number; height: number; diagnostics: TraceDiagnostics }
-export interface TraceDiagnostics extends TransitionDiagnostics, ContourCleanupDiagnostics { underpaintPairs: number; underpaintPaths: number; sharedFairingCandidates: number; sharedFairingAccepted: number; sharedFairingRoughnessBefore: number; sharedFairingRoughnessAfter: number; unitFragments: number; merges: number; swaps: number; puncturedCorners: number; tangentRefits: number; rasterSteps: number; rasterEnergyBefore: number; rasterEnergyAfter: number; smallAreaConstraints: number; guardedFits: number; fitDeviationBefore: number; fitDeviationAfter: number; mergedTransitionRegions: number; reassignedTransitionPixels: number; straightSpans: number; compactedCurvePairs: number; protectedDetailPixels: number; qualityRefits: number; qualitySkipped: number; finalRasterBefore: number; finalRasterAfter: number; ellipses: number; sceneErrorBefore: number; sceneErrorAfter: number; sceneDetailBefore: number; sceneDetailAfter: number; sceneEdgeBefore: number; sceneEdgeAfter: number; sceneCandidateError: number; globalCandidates: number; globalAccepted: number; regularizedChains: number; protectedDetailCandidates: number; detailProtectionAccepted: number }
+export interface TraceDiagnostics extends TransitionDiagnostics, ContourCleanupDiagnostics, SourceDiagnostics, LocalRefinementDiagnostics { underpaintPairs: number; underpaintPaths: number; sharedFairingCandidates: number; sharedFairingAccepted: number; sharedFairingRoughnessBefore: number; sharedFairingRoughnessAfter: number; unitFragments: number; merges: number; swaps: number; puncturedCorners: number; tangentRefits: number; rasterSteps: number; rasterEnergyBefore: number; rasterEnergyAfter: number; smallAreaConstraints: number; guardedFits: number; fitDeviationBefore: number; fitDeviationAfter: number; mergedTransitionRegions: number; reassignedTransitionPixels: number; straightSpans: number; compactedCurvePairs: number; protectedDetailPixels: number; qualityRefits: number; qualitySkipped: number; finalRasterBefore: number; finalRasterAfter: number; ellipses: number; sceneErrorBefore: number; sceneErrorAfter: number; sceneDetailBefore: number; sceneDetailAfter: number; sceneEdgeBefore: number; sceneEdgeAfter: number; sceneCandidateError: number; globalCandidates: number; globalAccepted: number; regularizedChains: number; protectedDetailCandidates: number; detailProtectionAccepted: number }
 type Point = [number, number];
 type RGB = [number, number, number];
 type Curve = { from: Point; to: Point; controls?: [Point, Point] };
@@ -1234,6 +1240,10 @@ function finishCurves(raw: Point[], points: Point[], corners: Set<number>, initi
   const accept = (candidate: Curve[]) => { const trial = energy(candidate); if (trial <= before * 1.02 + 1e-6 && score(trial, candidate) < score(value, best) && !intersects(candidate)) { best = candidate; value = trial; return true; } return false; };
   for (const t of [Math.min(.2, tolerance), tolerance]) accept(refit(t));
   if (lines.length) accept(refit(tolerance, true));
+  if (options.geometry !== false) {
+    const candidates = closed ? [fitGeometricPolygon(points), fitRoundedRectangle(points)] : [fitCircularArc(points)];
+    for (const candidate of candidates) if (candidate && candidate.length <= best.length && accept(candidate)) diagnostics.geometricShapes = (diagnostics.geometricShapes ?? 0) + 1;
+  }
   const compact = compactSmoothCurves(best, [...corners].map(i => points[i]), Math.min(.2, tolerance)), removed = best.length - compact.length;
   if (removed > 0 && accept(compact)) diagnostics.compactedCurvePairs += removed;
   if (closed && corners.size <= 2) {
@@ -1315,7 +1325,7 @@ export function consolidateRasterTips(raw: Point[], corners: Set<number>): Map<n
   return targets;
 }
 
-function fitChain(raw: Point[], width: number, height: number, options: TraceOptions, diagnostics: TraceDiagnostics, measurements: (Measurement | undefined)[] = [], raster?: RasterChain): Curve[] {
+function fitChain(raw: Point[], width: number, height: number, options: TraceOptions, diagnostics: TraceDiagnostics, measurements: (Measurement | undefined)[] = [], raster?: RasterChain, capture?: (points: Point[], cuts: Set<number>) => void): Curve[] {
   if (!options.smooth) {
     const cuts = simplify(raw, options.tolerance);
     return cuts.slice(1).map((to, i) => ({ from: raw[cuts[i]], to: raw[to] }));
@@ -1413,8 +1423,33 @@ function fitChain(raw: Point[], width: number, height: number, options: TraceOpt
   }
   const compact = compactSmoothCurves(curves, [...corners].map(i => points[i]));
   diagnostics.compactedCurvePairs += curves.length - compact.length;
+  capture?.(points, cuts);
   return raster && objective ? finishCurves(raw, smoothed, corners, compact, raster, options, diagnostics, objective) : compact;
 }
+
+/** Refit measured contour spans, retaining every corner and shared endpoint. */
+function refitLocalChain(points: Point[], cuts: Set<number>, original: Curve[]): Curve[] {
+  if (points.length < 4 || points.length > 4000 || !original.length || distance2(points[0], original[0].from) > 1e-12 || distance2(points[points.length - 1], original[original.length - 1].to) > 1e-12) return original;
+  const sorted = [...cuts].sort((a, b) => a - b), curves: Curve[] = [];
+  const closed = distance2(points[0], points[points.length - 1]) === 0, count = points.length - (closed ? 1 : 0);
+  const tangent = (i: number): Point => {
+    const at = (j: number) => points[closed ? (j + count) % count : Math.max(0, Math.min(count - 1, j))];
+    return unit(at(i - 2), at(i + 2));
+  };
+  for (let i = 1; i < sorted.length; i++) {
+    const a = sorted[i - 1], b = sorted[i], span = points.slice(a, b + 1);
+    if (b <= a) continue;
+    if (span.every(p => lineDistance2(p, span[0], span[span.length - 1]) <= .01 ** 2)) { curves.push({ from: span[0], to: span[span.length - 1] }); continue; }
+    // Supported cuts keep their own incoming/outgoing directions.
+    const radius = Math.min(3, b - a), left = a === 0 && closed ? tangent(a) : unit(points[a], points[a + radius]);
+    const right = b === points.length - 1 && closed ? tangent(b) : unit(points[b - radius], points[b]);
+    curves.push(...fitWithSharedTangents(span, .15, left, [-right[0], -right[1]]));
+  }
+  if (curves.length > original.length * 1.5 + 4 || !strokeWithin(curves, points, .35) || strokeSelfIntersects(curves)) return original;
+  return curves;
+}
+
+export function newTraceDiagnostics(): TraceDiagnostics { return { ...contourCleanupDefaults, ...transitionDefaults, noiseScore: 0, coherentLabelPixels: 0, localDefectAreas: 0, localRefitChains: 0, localRefitAccepted: 0, underpaintPairs: 0, underpaintPaths: 0, sharedFairingCandidates: 0, sharedFairingAccepted: 0, sharedFairingRoughnessBefore: 0, sharedFairingRoughnessAfter: 0, unitFragments: 0, merges: 0, swaps: 0, puncturedCorners: 0, tangentRefits: 0, rasterSteps: 0, rasterEnergyBefore: 0, rasterEnergyAfter: 0, smallAreaConstraints: 0, guardedFits: 0, fitDeviationBefore: 0, fitDeviationAfter: 0, mergedTransitionRegions: 0, reassignedTransitionPixels: 0, straightSpans: 0, compactedCurvePairs: 0, protectedDetailPixels: 0, qualityRefits: 0, qualitySkipped: 0, finalRasterBefore: 0, finalRasterAfter: 0, ellipses: 0, sceneErrorBefore: 0, sceneErrorAfter: 0, sceneDetailBefore: 0, sceneDetailAfter: 0, sceneEdgeBefore: 0, sceneEdgeAfter: 0, sceneCandidateError: 0, globalCandidates: 0, globalAccepted: 0, regularizedChains: 0, protectedDetailCandidates: 0, detailProtectionAccepted: 0 }; }
 
 function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, options: TraceOptions, progress: (value: number, label: string) => void, protect: boolean, capture: (pixels: Uint8Array) => void): TraceResult {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 2048 * 2048 || rgba.length !== width * height * 4) throw new Error('Ukuran raster tidak valid (maksimum 4 megapiksel).');
@@ -1422,7 +1457,7 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
   const whiteMode = options.whiteMode ?? (options.removeWhite ? 'all' : 'none');
   if (!['none', 'background', 'all'].includes(whiteMode)) throw new Error('Mode hapus putih tidak valid.');
   progress(10, 'Mencari palet warna…');
-  const diagnostics: TraceDiagnostics = { ...contourCleanupDefaults, ...transitionDefaults, underpaintPairs: 0, underpaintPaths: 0, sharedFairingCandidates: 0, sharedFairingAccepted: 0, sharedFairingRoughnessBefore: 0, sharedFairingRoughnessAfter: 0, unitFragments: 0, merges: 0, swaps: 0, puncturedCorners: 0, tangentRefits: 0, rasterSteps: 0, rasterEnergyBefore: 0, rasterEnergyAfter: 0, smallAreaConstraints: 0, guardedFits: 0, fitDeviationBefore: 0, fitDeviationAfter: 0, mergedTransitionRegions: 0, reassignedTransitionPixels: 0, straightSpans: 0, compactedCurvePairs: 0, protectedDetailPixels: 0, qualityRefits: 0, qualitySkipped: 0, finalRasterBefore: 0, finalRasterAfter: 0, ellipses: 0, sceneErrorBefore: 0, sceneErrorAfter: 0, sceneDetailBefore: 0, sceneDetailAfter: 0, sceneEdgeBefore: 0, sceneEdgeAfter: 0, sceneCandidateError: 0, globalCandidates: 0, globalAccepted: 0, regularizedChains: 0, protectedDetailCandidates: 0, detailProtectionAccepted: 0 };
+  const diagnostics = newTraceDiagnostics();
   const { labels, palette, flatInteriors } = options.smooth && options.colors >= 8 && options.minArea >= 4 && whiteMode === 'background'
     ? quantizeFlatInteriors(rgba, options.colors, width, height) : { ...quantize(rgba, options.colors), flatInteriors: false };
   const detailEvidence = options.smooth || options.minArea > 0 ? protectDetails(rgba, labels, palette, width, height) : undefined;
@@ -1435,6 +1470,11 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
   if (options.minArea > 0) compactPalette(rgba, labels, palette, width, height, options.minArea, detail?.colors, flatInteriors);
   detail?.restore();
   if (!flatInteriors) refinePaletteInteriors(rgba, labels, palette, width, height, detail?.mask());
+  if (options.noiseCleanup === true && options.smooth) {
+    const noise = compressionNoise(rgba, width, height);
+    diagnostics.noiseScore = noise.score;
+    if (noise.detected) diagnostics.coherentLabelPixels = cohereNoisyLabels(rgba, labels, palette, width, height, detailEvidence?.pixels);
+  }
   refineTransitions(rgba, labels, width, height, palette);
   if (flatInteriors) regularizeShadeLabels(labels, width, height, palette);
   detail?.restore();
@@ -1488,6 +1528,7 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
   const field: RasterField = { width, height, observed: rgba, predicted: new Float32Array(rgba.length) };
   if (options.smooth) labels.forEach((label, i) => field.predicted.set(color(label), i * 4));
   const chains: Chain[] = [];
+  const measuredChains: { points: Point[]; cuts: Set<number> }[] = [];
   const walkChain = (edgeId: number, start: number) => {
     const seed = edges[edgeId], forward = seed.a === start;
     const left = color(forward ? seed.left : seed.right), right = color(forward ? seed.right : seed.left);
@@ -1505,7 +1546,7 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
       if (current === start || junction(current)) break;
       edgeId = adjacency.get(current)!.find(id => id !== edgeId)!;
     }
-    chains.push({ curves: fitChain(nodes, width, height, options, diagnostics, measurements, raster) });
+    chains.push({ curves: fitChain(nodes, width, height, options, diagnostics, measurements, raster, options.localRefinement ? (points, cuts) => { measuredChains[chains.length] = { points, cuts: new Set(cuts) }; } : undefined) });
   };
   progress(60, 'Menyederhanakan kontur…');
   edges.forEach((e, id) => { if (e.chain < 0 && (junction(e.a) || junction(e.b))) walkChain(id, junction(e.a) ? e.a : e.b); });
@@ -1632,9 +1673,35 @@ function traceRasterRun(rgba: Uint8ClampedArray, width: number, height: number, 
         diagnostics.contourCandidateError = after.error; diagnostics.contourDetailBefore = current.detailError; diagnostics.contourDetailAfter = after.detailError;
         if (allowsContourCleanup(current, after)) {
           result = proposed; diagnostics.contourCleanupAccepted++; diagnostics.contourCleanupChains = changed;
+          selectedGeometry = cleaned;
           diagnostics.contourBendBefore = oldBend; diagnostics.contourBendAfter = newBend;
           diagnostics.sceneErrorAfter = after.error; diagnostics.sceneDetailAfter = after.detailError;
           diagnostics.sceneDetailBefore = current.detailError; diagnostics.sceneEdgeAfter = after.edgeError;
+        }
+      }
+    }
+    if (options.localRefinement && result.segments <= 6000) {
+      const protectedPixels = detailEvidence?.pixels ?? detailPixels;
+      const current = evaluateSvgScene(result.svg, rgba, width, height, whiteMode !== 'none', protectedPixels);
+      const areas = findSceneDefects(current, width, height);
+      diagnostics.localDefectAreas = areas.length;
+      if (areas.length) {
+        let changed = 0;
+        const candidate = selectedGeometry.map((chain, i) => {
+          const target = measuredChains[i];
+          if (!target || changed >= 12 || !target.points.some(p => areas.some(a => p[0] >= a.x0 - 2 && p[0] <= a.x1 + 2 && p[1] >= a.y0 - 2 && p[1] <= a.y1 + 2))) return chain;
+          const curves = refitLocalChain(target.points, target.cuts, chain.curves);
+          if (curves === chain.curves) return chain;
+          changed++; return { curves };
+        });
+        diagnostics.localRefitChains = changed;
+        if (changed) {
+          const proposed = exportGeometry(candidate);
+          const after = evaluateSvgScene(proposed.svg, rgba, width, height, whiteMode !== 'none', protectedPixels);
+          if (proposed.segments <= result.segments * 1.25 + 8 && localRefinementAllows(current, after, areas)) {
+            result = proposed; diagnostics.localRefitAccepted = 1;
+            diagnostics.sceneErrorAfter = after.error; diagnostics.sceneDetailAfter = after.detailError; diagnostics.sceneEdgeAfter = after.edgeError;
+          }
         }
       }
     }
@@ -1669,6 +1736,48 @@ function traceRasterGeometry(rgba: Uint8ClampedArray, width: number, height: num
 }
 
 export function traceRaster(rgba: Uint8ClampedArray, width: number, height: number, options: TraceOptions, progress: (value: number, label: string) => void = () => {}): TraceResult {
-  const result = traceRasterGeometry(rgba, width, height, options, progress);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 2048 ** 2 || rgba.length !== width * height * 4) throw new Error('Ukuran raster tidak valid (maksimum 4 megapiksel).');
+  if (!Number.isInteger(options.colors) || options.colors < 2 || options.colors > 16 || !Number.isFinite(options.tolerance) || options.tolerance < .1 || options.tolerance > 4 || !Number.isFinite(options.minArea) || options.minArea < 0 || options.minArea > 100) throw new Error('Pengaturan tracing tidak valid.');
+  const whiteMode = options.whiteMode ?? (options.removeWhite ? 'all' : 'none');
+  if (!['none','background','all'].includes(whiteMode)) throw new Error('Mode hapus putih tidak valid.');
+  for (const flag of ['geometry','pixelArt','gradients'] as const) if (options[flag] !== undefined && typeof options[flag] !== 'boolean') throw new Error('Pengaturan tracing tidak valid.');
+  const trace = (p: Uint8ClampedArray, w: number, h: number, o: TraceOptions) => traceRasterGeometry(p, w, h, o);
+  let candidate: TraceResult | undefined, candidateMetrics: ReturnType<typeof evaluateSvgScene> | undefined;
+  let specializedFailures = 0;
+  const offer = (build: () => TraceResult | undefined) => {
+    try {
+      const value = build();
+      if (!value) return;
+      const metrics = evaluateSvgScene(value.svg, rgba, width, height, whiteMode !== 'none');
+      if (!candidateMetrics || metrics.error < candidateMetrics.error) {
+        candidate = { ...value, diagnostics: { ...value.diagnostics, sceneErrorBefore: metrics.error, sceneErrorAfter: metrics.error, sceneDetailBefore: metrics.detailError, sceneDetailAfter: metrics.detailError, sceneEdgeBefore: metrics.edgeError, sceneEdgeAfter: metrics.edgeError } };
+        candidateMetrics = metrics;
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      specializedFailures++;
+    }
+  };
+  const completed = (result: TraceResult) => {
+    if (specializedFailures) result.diagnostics.specializedFailures = specializedFailures;
+    progress(100, 'Tracing selesai');
+    return result;
+  };
+  progress(0, 'Menganalisis bentuk dan cat…');
+  if (options.pixelArt !== false) offer(() => tracePixelGrid(rgba, width, height, options, quantize, newTraceDiagnostics));
+  if (options.smooth && options.gradients !== false && !candidate) offer(() => traceGradientRegions(rgba, width, height, options, trace));
+  // A practically exact specialized reconstruction needs no expensive baseline.
+  if (candidate && candidateMetrics && candidateMetrics.error < 1e-5 && candidateMetrics.edgeError < 1e-4) return completed(candidate);
+  let result: TraceResult;
+  try { result = traceRasterGeometry(rgba, width, height, options, progress); }
+  catch (error) {
+    if (candidate && candidateMetrics && candidateMetrics.error < .0001 && error instanceof Error && error.message.includes('terlalu kompleks')) return completed(candidate);
+    throw error;
+  }
+  if (candidate && candidateMetrics) {
+    const baseline = evaluateSvgScene(result.svg, rgba, width, height, whiteMode !== 'none');
+    if (candidateMetrics.error < baseline.error * .98 && sceneAllows(baseline, candidateMetrics) && candidate.segments <= result.segments * 1.25 + 8) return completed(candidate);
+  }
+  if (specializedFailures) result.diagnostics.specializedFailures = specializedFailures;
   return options.smooth ? underpaint(result) : result;
 }

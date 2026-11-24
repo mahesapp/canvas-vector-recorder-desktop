@@ -31,6 +31,7 @@ const bounds = (curves: Curve[]) => {
 /** Fill shared color seams inside a clipped domain, excluding later visible ink. */
 export function underpaint(result: TraceResult): TraceResult {
   const paths = tracingSvgPaths(result.svg);
+  if (paths.some(path => path.gradient)) return result;
   const faces = paths.map(path => {
     const rgb = parseInt(path.color.slice(1), 16), dark = Math.max(rgb >>> 16, (rgb >>> 8) & 255, rgb & 255) < 100, loops = parse(path.data);
     let area = 0;

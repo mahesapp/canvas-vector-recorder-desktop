@@ -63,6 +63,23 @@ test('browser export layout preserves underpaint clipping in SVG and EPS', async
   }
 });
 
+test('browser export preserves editable gradient definitions, scale and EPS shading', async () => {
+  const source='<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="8" y2="0"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs><path fill="url(#g)" fill-rule="evenodd" d="M0 0L8 0L8 8L0 8Z"/></svg>';
+  const s={minMp:15,maxMp:65,ratio:'4:5',artworkScale:1.3,removeWhiteBackground:true};
+  const svg=await renderExport(source,s,'svg','gradient'),paths=tracingSvgPaths(svg);
+  assert.equal(paths.length,1);assert.equal(paths[0].gradient.kind,'linear');assert.match(paths[0].original,/transform="matrix\(/);
+  assert.match(svg,/<linearGradient/);const eps=await renderExport(source,s,'eps','gradient');
+  assert.match(eps,/\/ShadingType 2/);assert.match(eps,/\/Coords \[0 0 8 0\]/);assert.ok(eps.indexOf('concat\n')<eps.indexOf('shfill'));assert.doesNotMatch(eps,/\bcolorimage\b/);
+});
+
+test('export color limits count gradient stops and disable gradients on the retraced copy', async () => {
+  const svg='<svg width="8" height="8" viewBox="0 0 8 8"><defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="8" y2="0"><stop offset="0" stop-color="#ff0000"/><stop offset="0.5" stop-color="#00ff00"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs><path fill="url(#g)" d="M0 0L8 0L8 8L0 8Z"/></svg>';
+  const config={mode:'manual',resolution:512,options:{colors:8,tolerance:.8,minArea:0,smooth:true,removeWhite:false,whiteMode:'none'}},item={config,output:{result:{svg}}};let applied;
+  const runner=async copy=>{applied=copy.config.options;return {result:{svg:'flattened'}};};
+  assert.equal(await exportSource(item,{...exportDefaults,maxColors:3},runner),svg);assert.equal(applied,undefined);
+  assert.equal(await exportSource(item,{...exportDefaults,maxColors:2},runner),'flattened');assert.equal(applied.gradients,false);assert.equal(applied.colors,2);assert.equal(item.config.options.gradients,undefined);
+});
+
 test('global maximum colors retraces only exports exceeding the limit and preserves item settings', async () => {
   const width = 32, height = 32, pixels = new Uint8ClampedArray(width * height * 4);
   const palette = [[255,0,0,255], [0,255,0,255], [0,0,255,255], [255,255,0,255]];

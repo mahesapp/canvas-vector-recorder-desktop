@@ -1,4 +1,5 @@
 import { tracingSvgPaths } from './svg-paths';
+import { gradientPostScript } from './gradient-paint';
 /**
  * Converts path-only tracing SVG to EPS (Encapsulated PostScript 3.0)
  * with embedded TIFF (8-bit Color / Baseline RGB) preview and Adobe XMP metadata.
@@ -119,11 +120,11 @@ export function generatePostScript(
     const [r, g, b] = parseHexColor(path.color), pathPs = pathToPs(path.data);
     if (!pathPs.trim()) continue;
     psPaths += 'gsave\n';
-    psPaths += `${f(r)} ${f(g)} ${f(b)} setrgbcolor\n`;
+    if (!path.gradient) psPaths += `${f(r)} ${f(g)} ${f(b)} setrgbcolor\n`;
     const matrix = path.original.match(/transform="matrix\(([^)]+)\)"/)?.[1].trim().split(/[\s,]+/).map(Number);
     if (matrix?.length === 6 && matrix.every(Number.isFinite)) psPaths += '[' + matrix.map(f).join(' ') + '] concat\n';
     if (path.clip) psPaths += 'newpath\n' + pathToPs(path.clip) + 'clip\nnewpath\n';
-    psPaths += 'newpath\n' + pathPs + (path.evenodd ? 'eofill\n' : 'fill\n') + 'grestore\n';
+    psPaths += 'newpath\n' + pathPs + (path.gradient ? (path.evenodd ? 'eoclip\n' : 'clip\n') + 'newpath\n' + gradientPostScript(path.gradient) : path.evenodd ? 'eofill\n' : 'fill\n') + 'grestore\n';
   }
 
   const wRound = Math.round(width);

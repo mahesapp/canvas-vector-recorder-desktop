@@ -1,6 +1,7 @@
 import { tracingSvgPaths } from './svg-paths';
-/** Port of mini-vectorizer SvgSceneQuality. Only accepts the opaque even-odd
- * M/L/C/Z subset exported by our engine; no DOM or external SVG resources. */
+import { gradientColor, type GradientPaint } from './gradient-paint';
+/** Port of mini-vectorizer SvgSceneQuality, extended for local opaque gradients.
+ * Accepts the exported M/L/C/Z, winding and clip subset; no external resources. */
 type Point = [number, number];
 type Edge = { x: number; y: number; dx: number; dy: number; layer: number; end: number; winding: number };
 export interface SceneMetrics { error: number; detailError: number; edgeError: number; edgePixels: number; tiles: Float64Array }
@@ -23,6 +24,7 @@ export function sceneAllows(before: SceneMetrics, after: SceneMetrics) {
 export function evaluateSvgScene(svg: string, rgba: Uint8ClampedArray, width: number, height: number, whiteRemoved = false, protectedPixels?: Uint8Array): SceneMetrics {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width * height > 2048 * 2048 || rgba.length !== width * height * 4 || protectedPixels && protectedPixels.length !== width * height) throw new Error('Ukuran evaluasi SVG tidak valid.');
   const starts: (Edge[] | undefined)[] = new Array(height * SAMPLES), colors: number[][] = [], clipLayers = new Map<number, number>(), nonzero = new Set<number>();
+  const gradients = new Map<number, GradientPaint>();
   const edge = (a: Point | undefined, b: Point | undefined, layer: number) => {
     if (!a || !b) throw new Error('Kontur SVG tidak lengkap.');
     if (Math.abs(a[1] - b[1]) < 1e-12) return;
@@ -57,6 +59,7 @@ export function evaluateSvgScene(svg: string, rgba: Uint8ClampedArray, width: nu
   for (const path of tracingSvgPaths(svg)) {
     const rgb = parseInt(path.color.slice(1), 16), layer = colors.length;
     colors.push([((rgb >>> 16) & 255) / 255, ((rgb >>> 8) & 255) / 255, (rgb & 255) / 255, 1]);
+    if (path.gradient) gradients.set(layer, path.gradient);
     parsePath(path.data, layer); if (!path.evenodd) nonzero.add(layer);
     if (path.clip) { const clip = colors.length; colors.push([]); nonzero.add(clip); clipLayers.set(layer, clip); parsePath(path.clip, clip); }
   }
@@ -64,10 +67,11 @@ export function evaluateSvgScene(svg: string, rgba: Uint8ClampedArray, width: nu
   const columns = Math.ceil(width / SCENE_TILE), tiles = new Float64Array(columns * Math.ceil(height / SCENE_TILE));
   const metrics: SceneMetrics = { error: 0, detailError: 0, edgeError: 0, edgePixels: 0, tiles }; let detailPixels = 0;
   const row = new Float64Array(width * 4); let active: Edge[] = [];
-  const span = (from: number, to: number, color: number[]) => {
+  const span = (from: number, to: number, color: number[], gradient: GradientPaint | undefined, y: number) => {
     from = Math.max(0, from); to = Math.min(width, to); if (to <= from) return;
     for (let x = Math.floor(from); x < Math.ceil(to); x++) {
       const area = (Math.min(to, x + 1) - Math.max(from, x)) / SAMPLES;
+      if (gradient) { const c=gradientColor(gradient,(Math.min(to,x+1)+Math.max(from,x))/2,y);for(let k=0;k<3;k++)row[x*4+k]+=area*c[k];row[x*4+3]+=area;continue; }
       for (let c = 0; c < 4; c++) row[x * 4 + c] += area * color[c];
     }
   };
@@ -82,7 +86,7 @@ export function evaluateSvgScene(svg: string, rgba: Uint8ClampedArray, width: nu
     const y = (scan + .5) / SAMPLES, hits = active.map(e => ({ x: e.x + (y - e.y) * e.dx / e.dy, layer: e.layer, winding: e.winding })).sort((a, b) => a.x - b.x);
     const paint = new Set<number>(), windings = new Int32Array(colors.length); let previous = 0, top = -1;
     for (const hit of hits) {
-      if (top >= 0) span(previous, hit.x, colors[top]);
+      if (top >= 0) span(previous, hit.x, colors[top], gradients.get(top), y);
       if (nonzero.has(hit.layer)) { windings[hit.layer] += hit.winding; if (windings[hit.layer]) paint.add(hit.layer); else paint.delete(hit.layer); }
       else if (!paint.delete(hit.layer)) paint.add(hit.layer);
       top = -1;
