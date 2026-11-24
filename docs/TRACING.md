@@ -4,6 +4,8 @@ Halaman Tracing tersedia sebagai tab terpisah di dalam studio setelah lisensi ap
 
 ## Alur penggunaan
 
+Mode Auto dapat mencoba palet yang lebih kaya untuk gambar berdetail halus dan memilih pembersihan **Minimal · <2 px** bila hasil terukur membaik. Kandidat tetap diperiksa terhadap galat gambar, tepi, dan kompleksitas. Contoh dan batas hasil: [regresi ikon foto mengilap](../RND/tracing-quality/glossy-icon-v15/REPORT.md).
+
 1. Buka tab **Tracing**, pilih atau tarik PNG/JPG/WebP (maksimum 20 MB, 64 megapiksel).
 2. Pilih maksimum 2–16 warna, detail, pembersihan bintik, dan resolusi proses 512/1024 piksel pada sisi terpanjang. Gambar kecil tidak diperbesar. Saat pembersihan aktif, warna yang sangat mirip dan warna transisi tanpa dukungan interior dapat digabung.
 3. Tekan **Mulai tracing**. Worker menampilkan tahapan proses dan dapat dihentikan dengan **Batalkan**.

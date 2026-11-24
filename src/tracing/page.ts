@@ -97,7 +97,7 @@ export function initTracing(root: HTMLElement) {
             <label for="traceDetail">Detail kontur</label>
             <select id="traceDetail"><option value="0.2">Sangat tinggi</option><option value="0.35">Tinggi</option><option value="0.8" selected>Seimbang</option><option value="1.6">Sederhana</option></select>
             <label for="traceNoise">Bersihkan bintik</label>
-            <select id="traceNoise"><option value="0">Mati</option><option value="4" selected>Kecil · &lt; 4 px</option><option value="12">Sedang · &lt; 12 px</option><option value="24">Kuat · &lt; 24 px</option></select>
+            <select id="traceNoise"><option value="0">Mati</option><option value="2">Minimal · &lt; 2 px</option><option value="4" selected>Kecil · &lt; 4 px</option><option value="12">Sedang · &lt; 12 px</option><option value="24">Kuat · &lt; 24 px</option></select>
             <p class="trace-help">Pilih Mati untuk mempertahankan bidang kecil dan warna transisi.</p>
             <label for="traceResolution">Resolusi proses</label>
             <select id="traceResolution"><option value="512">512 px — cepat</option><option value="1024" selected>1024 px — detail</option><option value="2048">2048 px — detail tinggi</option></select>
