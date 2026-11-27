@@ -1,6 +1,6 @@
 [package]
 name = "canvas-vector-recorder-desktop"
-version = "1.2.0"
+version = "1.3.0"
 description = "Canvas Vector Recorder desktop application"
 authors = ["Canvas Vector Recorder"]
 edition = "2021"

@@ -167,6 +167,8 @@ pub fn run() {
             commands::save_svg_asset,
             commands::save_eps,
             commands::save_eps_asset,
+            commands::save_raw_svg,
+            commands::save_raw_eps,
             commands::clear_surfaces,
             commands::clear_recording,
             commands::open_target_url,

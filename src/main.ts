@@ -19,7 +19,6 @@ import {
   Moon,
   MonitorPlay,
   Pencil,
-  Pipette,
   Plus,
   RefreshCw,
   RotateCw,
@@ -35,6 +34,8 @@ import { activateLicense, licenseStatus, normalizedEmail } from './license';
 import { evaluateDesktopAppConfig, fetchDesktopAppConfig, isVersionLessThan, type DesktopAppAccessPolicy } from './appConfig';
 import { initDiscover } from './discover';
 import { initRecorderLoader } from './recorder-loader';
+import { VectorEditorController } from './editor/vectorEditor';
+import { VectorSvgCodec } from './editor/vectorSvgCodec';
 import type { CanvasDetection, LicenseStatus, MicrostockSettings, SvgAsset, SvgResult, StartRecordingResult, TargetTabInfo, TargetTabsState } from './types';
 
 if (import.meta.env.PROD) {
@@ -45,8 +46,10 @@ if (import.meta.env.PROD) {
 }
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
-const lucideIcons = { Bell, Check, ChevronDown, ClipboardPaste, Copy, Download, DownloadCloud, ExternalLink, FolderOpen, Globe, Lightbulb, Moon, MonitorPlay, Pencil, Pipette, Plus, RefreshCw, RotateCw, RotateCcw, Settings2, Sparkles, Sun, Trash2, X };
+const lucideIcons = { Bell, Check, ChevronDown, ClipboardPaste, Copy, Download, DownloadCloud, ExternalLink, FolderOpen, Globe, Lightbulb, Moon, MonitorPlay, Pencil, Plus, RefreshCw, RotateCw, RotateCcw, Settings2, Sparkles, Sun, Trash2, X };
 let discoverControl: ReturnType<typeof initDiscover> | null = null;
+let vectorEditor: VectorEditorController | null = null;
+const editedSvgByAsset = new Map<string, { svg: string; width: number; height: number; paths: number }>();
 
 function iconPlaceholder(name: string): HTMLElement {
   const element = document.createElement('i');
@@ -72,6 +75,7 @@ function setIconButtonContent(button: HTMLButtonElement, icon: string, label: st
 }
 
 function handleRefreshShortcut(event: KeyboardEvent): void {
+  if (vectorEditor?.isOpen()) return;
   if (event.altKey || event.shiftKey || (!event.metaKey && !event.ctrlKey)) return;
   if (event.key === 'Tab' && targetTabs.length) {
     event.preventDefault();
@@ -146,16 +150,6 @@ let activeTargetId: string | null = null;
 let targetTabs: TargetTabInfo[] = [];
 let detectedAssets: CanvasDetection[] = [];
 let detectedSvgAssets: SvgAsset[] = [];
-const removedColorsByAsset = new Map<string, Set<string>>();
-let objectEraserActive = false;
-let wireframeModeActive = false;
-const markedElements = new Set<string>();
-const erasedElementsByAsset = new Map<string, Set<string>>();
-let pointerDownPos: { x: number; y: number } | null = null;
-let pendingRemovalColor: string | null = null;
-const canvasColors = new Map<string, { revision: number; colors: string[] }>();
-const svgColors = new Map<string, { revision: number; colors: string[] }>();
-const canvasColorRequests = new Set<string>();
 type AssetTab = 'canvas' | 'svg';
 let activeAssetTab: AssetTab = 'canvas';
 const thumbnailUrls = new Map<string, string>();
@@ -437,9 +431,6 @@ interface PersistedSettings {
   customRatioHeight: number;
   minPixels: number;
   maxPixels: number;
-  backgroundColor: string;
-  removeAssetColors: boolean;
-  applyBackgroundColor: boolean;
   artworkScale: number;
   targetUrl: string;
   saveDirectory: string | null;
@@ -1100,292 +1091,90 @@ function selectedRatioForBackend(): string {
   return `${width}:${height}`;
 }
 
-function settings(assetId: string | null = selectedCanvas || selectedSvg): MicrostockSettings {
+function settings(): MicrostockSettings {
   return {
     profile: 'custom',
     ratio: selectedRatioForBackend(),
     minPixels: Number($<HTMLInputElement>('minPixels').value) * 1_000_000,
     maxPixels: Number($<HTMLInputElement>('maxPixels').value) * 1_000_000,
-    backgroundColor: $<HTMLInputElement>('backgroundColor').value || '#ffffff',
-    transparentBackground: !$<HTMLInputElement>('applyBackgroundColor').checked,
-    removedColors: $<HTMLInputElement>('removeAssetColors').checked
-      ? [...(removedColorsByAsset.get(assetId || '') || [])] : [],
-    removedElements: [...(erasedElementsByAsset.get(assetId || '') || [])],
+    backgroundColor: '#ffffff',
+    transparentBackground: true,
+    removedColors: [],
+    removedElements: [],
     artworkScale,
   };
 }
 
-const SVG_PAINT_ELEMENTS = 'path,rect,circle,ellipse,polygon,polyline,line,text,use';
-const colorProbe = document.createElement('canvas').getContext('2d');
-
-function normalizedAssetColor(value: string | null): string | null {
-  const color = value?.trim();
-  if (!color || /^(none|transparent|currentcolor|inherit)$/i.test(color) || /^(url|var)\(/i.test(color)) return null;
-  if (typeof CSS === 'undefined' || !CSS.supports('color', color) || !colorProbe) return null;
-  colorProbe.fillStyle = '#010203';
-  colorProbe.fillStyle = color;
-  const normalized = colorProbe.fillStyle;
-  const hex = /^#([0-9a-f]{3,8})$/i.exec(normalized);
-  if (hex) {
-    const digits = hex[1].length <= 4 ? hex[1].slice(0, 3).split('').map(digit => digit + digit).join('') : hex[1].slice(0, 6);
-    return `#${digits.toUpperCase()}`;
-  }
-  const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(normalized);
-  return rgb ? `#${rgb.slice(1, 4).map(part => Number(part).toString(16).padStart(2, '0')).join('').toUpperCase()}` : null;
-}
-
-function svgPaint(element: Element, property: 'fill' | 'stroke'): string | null {
-  for (let current: Element | null = element; current; current = current.parentElement) {
-    const styled = (current as SVGElement).style?.getPropertyValue(property);
-    const value = styled || current.getAttribute(property);
-    if (value) return value;
-  }
-  return property === 'fill' ? '#000000' : null;
-}
-
-function svgAssetDocument(markup: string): Document | null {
-  const document = new DOMParser().parseFromString(markup, 'image/svg+xml');
-  return document.querySelector('parsererror') ? null : document;
-}
-
-function colorsFromSvgMarkup(markup: string): string[] {
-  const document = svgAssetDocument(markup);
-  if (!document) return [];
-  const colors = new Set<string>();
-  document.querySelectorAll(SVG_PAINT_ELEMENTS).forEach(element => {
-    if (element.closest('defs')) return;
-    for (const property of ['fill', 'stroke'] as const) {
-      const color = normalizedAssetColor(svgPaint(element, property));
-      if (color) colors.add(color);
-    }
-  });
-  return [...colors].sort();
-}
-
-function selectedSvgSourceMarkup(): string | null {
-  const asset = detectedSvgAssets.find(item => item.svg_id === selectedSvg);
-  if (!asset) return null;
-  const removed = $<HTMLInputElement>('removeAssetColors').checked
-    ? removedColorsByAsset.get(asset.svg_id) : undefined;
-  const erased = erasedElementsByAsset.get(asset.svg_id);
-  if (!removed?.size && !erased?.size) return null;
-  const document = svgAssetDocument(asset.markup);
-  if (!document) throw new Error('SVG sumber tidak dapat dibaca untuk memproses aset');
-  const root = document.documentElement as unknown as SVGSVGElement;
-  if (erased?.size) {
-    let index = 0;
-    root.querySelectorAll(SVG_PAINT_ELEMENTS).forEach(element => {
-      if (element.closest('defs')) return;
-      const id = element.id || `svg-el-${index++}`;
-      if (erased.has(id)) {
-        element.remove();
-      }
-    });
-  }
-  if (removed?.size) {
-    root.querySelectorAll(SVG_PAINT_ELEMENTS).forEach(element => {
-      if (element.closest('defs')) return;
-      for (const property of ['fill', 'stroke'] as const) {
-        const color = normalizedAssetColor(svgPaint(element, property));
-        if (!color || !removed.has(color)) continue;
-        element.setAttribute(property, 'none');
-        (element as SVGElement).style?.setProperty(property, 'none');
-      }
-    });
-  }
-  return new XMLSerializer().serializeToString(root);
-}
-
-function selectedAssetColors(): string[] | null {
-  const canvas = detectedAssets.find(item => item.canvas_id === selectedCanvas);
-  const svg = detectedSvgAssets.find(item => item.svg_id === selectedSvg);
-  const cached = canvas && canvasColors.get(canvas.canvas_id);
-  let colors: string[] | null = canvas && cached && cached.revision === canvas.revision ? cached.colors : null;
-  if (svg) {
-    const cachedSvg = svgColors.get(svg.svg_id);
-    if (cachedSvg && cachedSvg.revision === svg.revision) colors = cachedSvg.colors;
-    else {
-      colors = colorsFromSvgMarkup(svg.markup);
-      svgColors.set(svg.svg_id, { revision: svg.revision, colors });
-    }
-  }
-  return colors;
-}
-
-function renderAssetColorList(): void {
-  const container = $('assetColorList');
+function updateVectorEditorButtons(): void {
   const assetId = selectedCanvas || selectedSvg;
-  const colors = selectedAssetColors();
-  container.replaceChildren();
-  if (!colors?.length) {
-    const message = document.createElement('span');
-    message.className = 'muted';
-    message.textContent = !assetId ? 'Gunakan pipet warna untuk memilih warna dari objek' : colors ? 'Tidak ada warna yang dapat dipilih' : 'Memuat warna aset…';
-    container.append(message);
+  const hasEdits = Boolean(assetId && editedSvgByAsset.has(assetId));
+  const editable = Boolean(lastSvg && VectorSvgCodec.isEditableSvg(lastSvg.svg));
+
+  const editBtn = document.getElementById('openVectorEditor') as HTMLButtonElement | null;
+  if (editBtn) {
+    editBtn.disabled = !editable;
+    editBtn.classList.toggle('has-edits', hasEdits);
+    editBtn.title = hasEdits
+      ? 'Lanjutkan edit vektor (memiliki perubahan tersimpan)'
+      : 'Edit objek, warna, pathfinder, layer, dan kanvas';
+  }
+
+  const resetBtn = document.getElementById('resetVectorEdits') as HTMLButtonElement | null;
+  if (resetBtn) {
+    resetBtn.hidden = !hasEdits;
+    resetBtn.disabled = !hasEdits;
+  }
+}
+
+function openVectorEditorForCurrentAsset(): void {
+  const assetId = selectedCanvas || selectedSvg;
+  if (!assetId || !lastSvg || !vectorEditor) return;
+  if (!VectorSvgCodec.isEditableSvg(lastSvg.svg)) {
+    status(workspaceStatus, 'Aset vektor ini tidak memiliki path yang dapat diedit.', 'error');
     return;
   }
-  const removed = removedColorsByAsset.get(assetId || '');
-  colors.forEach(color => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'asset-color-chip';
-    button.dataset.color = color;
-    button.setAttribute('aria-pressed', String(removed?.has(color) || false));
-    button.title = `Hapus warna ${color} dari hasil`;
-    const swatch = document.createElement('span');
-    swatch.className = 'asset-color-swatch';
-    swatch.style.backgroundColor = color;
-    const label = document.createElement('span');
-    label.textContent = color;
-    button.append(swatch, label);
-    container.append(button);
-  });
-  applyPendingRemovalColor();
-}
-
-function updateRemovedAssetColor(assetId: string, color: string, selectOnly = false): void {
-  syncAssetRemovalColor(color);
-  const removed = removedColorsByAsset.get(assetId) || new Set<string>();
-  if (removed.has(color) && !selectOnly) removed.delete(color);
-  else removed.add(color);
-  removedColorsByAsset.set(assetId, removed);
-  renderAssetColorList();
-  renderCanvases(detectedAssets);
-  refreshPreview().catch(error => status(workspaceStatus, errorMessage(error), 'error'));
-}
-
-function updateObjectEraserUI(): void {
-  const assetId = selectedCanvas || selectedSvg;
-  const markedCount = markedElements.size;
-  const erasedSet = assetId ? erasedElementsByAsset.get(assetId) : undefined;
-  const erasedCount = erasedSet ? erasedSet.size : 0;
-
-  const eraseBtn = $<HTMLButtonElement>('eraseMarkedObjects');
-  if (eraseBtn) {
-    eraseBtn.setAttribute('aria-pressed', String(objectEraserActive));
-    eraseBtn.title = !objectEraserActive ? 'Pilih objek yang akan dihapus'
-      : markedCount > 0 ? `Hapus ${markedCount} objek yang ditandai` : 'Keluar dari mode Hapus Objek';
-    const eraseLabel = eraseBtn.querySelector('span');
-    if (eraseLabel) eraseLabel.textContent = markedCount > 0 ? `Hapus Objek (${markedCount})` : 'Hapus Objek';
-  }
-
-  const clearBtn = $<HTMLButtonElement>('clearMarkedObjects');
-  if (clearBtn) {
-    clearBtn.hidden = markedCount === 0;
-    clearBtn.disabled = markedCount === 0;
-  }
-
-  const restoreBtn = $<HTMLButtonElement>('restoreErasedObjects');
-  if (restoreBtn) {
-    restoreBtn.hidden = erasedCount === 0;
-    restoreBtn.disabled = erasedCount === 0;
-    const restoreText = `Pulihkan ${erasedCount} objek terhapus`;
-    restoreBtn.title = restoreText;
-    restoreBtn.setAttribute('aria-label', restoreText);
-  }
-}
-
-function toggleObjectEraserMode(enabled: boolean): void {
-  objectEraserActive = enabled;
-  const stage = $('previewStage');
-  if (stage) stage.classList.toggle('eraser-mode', enabled);
-  if (!enabled && markedElements.size > 0) {
-    clearMarkedObjects();
-  }
-  updateObjectEraserUI();
-  if (enabled) {
-    status(workspaceStatus, 'Mode Hapus Objek aktif. Klik area objek pada preview untuk menandai', 'success');
-  }
-}
-
-function toggleWireframeMode(enabled: boolean): void {
-  wireframeModeActive = enabled;
-  const checkbox = document.getElementById('wireframePreview') as HTMLInputElement | null;
-  if (checkbox && checkbox.checked !== enabled) {
-    checkbox.checked = enabled;
-  }
-  const stage = $('previewStage');
-  if (stage) {
-    stage.classList.toggle('wireframe-mode', enabled);
-  }
-}
-
-function handleObjectEraserClick(clientX: number, clientY: number): void {
-  const elementUnder = document.elementFromPoint(clientX, clientY);
-  const target = elementUnder?.closest('[data-eraser-id]');
-  if (!target) return;
-  if (target.id === 'background-color' || target.closest('#background')) return;
-  const id = target.getAttribute('data-eraser-id');
-  if (!id) return;
-
-  if (markedElements.has(id)) {
-    markedElements.delete(id);
-    target.removeAttribute('data-eraser-marked');
-  } else {
-    markedElements.add(id);
-    target.setAttribute('data-eraser-marked', 'true');
-  }
-  updateObjectEraserUI();
-}
-
-async function eraseMarkedObjects(): Promise<void> {
-  const assetId = selectedCanvas || selectedSvg;
-  if (!assetId || markedElements.size === 0) return;
-
-  const currentErased = erasedElementsByAsset.get(assetId) || new Set<string>();
-  markedElements.forEach(id => currentErased.add(id));
-  erasedElementsByAsset.set(assetId, currentErased);
-
-  const count = markedElements.size;
-  markedElements.clear();
-  updateObjectEraserUI();
-
-  await refreshPreview();
-  status(workspaceStatus, `${count} area objek berhasil dihapus.`, 'success');
-}
-
-function clearMarkedObjects(): void {
-  markedElements.clear();
-  $('previewStage').querySelectorAll('[data-eraser-marked="true"]').forEach(el => {
-    el.removeAttribute('data-eraser-marked');
-  });
-  updateObjectEraserUI();
-}
-
-async function restoreErasedObjects(): Promise<void> {
-  const assetId = selectedCanvas || selectedSvg;
-  if (!assetId) return;
-  const currentErased = erasedElementsByAsset.get(assetId);
-  if (!currentErased || currentErased.size === 0) return;
-
-  currentErased.clear();
-  markedElements.clear();
-  updateObjectEraserUI();
-
-  await refreshPreview();
-  status(workspaceStatus, 'Semua objek yang dihapus berhasil dipulihkan', 'success');
-}
-
-async function loadCanvasColors(canvasId: string): Promise<void> {
-  const revision = detectedAssets.find(item => item.canvas_id === canvasId)?.revision;
-  if (revision === undefined || canvasColors.get(canvasId)?.revision === revision) return;
-  const requestKey = `${canvasId}:${revision}`;
-  if (canvasColorRequests.has(requestKey)) return;
-  canvasColorRequests.add(requestKey);
   try {
-    const source = await invoke<{ shapes: { fill: string }[]; gap_fillers: { stroke: string }[] } | null>('get_canvas_result', { canvasId });
-    const latestRevision = detectedAssets.find(item => item.canvas_id === canvasId)?.revision;
-    if (!source || latestRevision === undefined) return;
-    const colors = new Set<string>();
-    [...source.shapes.map(shape => shape.fill), ...source.gap_fillers.map(stroke => stroke.stroke)].forEach(paint => {
-      const color = normalizedAssetColor(paint);
-      if (color) colors.add(color);
+    vectorEditor.open(lastSvg.svg, displayedFilename() || lastSvg.filename, result => {
+      const targetId = selectedCanvas || selectedSvg;
+      if (!targetId || !lastSvg) return;
+      const width = result.document.exportWidth;
+      const height = result.document.exportHeight;
+      editedSvgByAsset.set(targetId, {
+        svg: result.svg,
+        width,
+        height,
+        paths: result.document.nodes.length,
+      });
+      lastSvg = {
+        ...lastSvg,
+        svg: result.svg,
+        stats: {
+          ...lastSvg.stats,
+          artboard: {
+            ...lastSvg.stats.artboard,
+            width,
+            height,
+            pixels: width * height,
+          },
+        },
+      };
+      renderSvgToPreviewStage(result.svg);
+      $('artboardSize').textContent = `${width}×${height}`;
+      updateVectorEditorButtons();
+      status(workspaceStatus, 'Perubahan vektor disimpan dan siap diexport (SVG / EPS).', 'success');
     });
-    canvasColors.set(canvasId, { revision: latestRevision, colors: [...colors].sort() });
-    if (selectedCanvas === canvasId) renderAssetColorList();
-  } finally {
-    canvasColorRequests.delete(requestKey);
+  } catch (error) {
+    status(workspaceStatus, `Gagal membuka editor vektor: ${errorMessage(error)}`, 'error');
   }
+}
+
+async function resetVectorEditsForCurrentAsset(): Promise<void> {
+  const assetId = selectedCanvas || selectedSvg;
+  if (!assetId || !editedSvgByAsset.has(assetId)) return;
+  editedSvgByAsset.delete(assetId);
+  updateVectorEditorButtons();
+  await refreshPreview();
+  status(workspaceStatus, 'Hasil edit vektor dikembalikan ke versi asli.', 'success');
 }
 
 function settingValidationError(): string | null {
@@ -1451,9 +1240,6 @@ function persistedSettings(): PersistedSettings {
     customRatioHeight: Number($<HTMLInputElement>('customRatioHeight').value) || DEFAULT_CUSTOM_RATIO.height,
     minPixels: Number($<HTMLInputElement>('minPixels').value),
     maxPixels: Number($<HTMLInputElement>('maxPixels').value),
-    backgroundColor: $<HTMLInputElement>('backgroundColor').value || '#ffffff',
-    removeAssetColors: $<HTMLInputElement>('removeAssetColors').checked,
-    applyBackgroundColor: $<HTMLInputElement>('applyBackgroundColor').checked,
     artworkScale,
     targetUrl: $<HTMLInputElement>('targetUrl').value,
     saveDirectory,
@@ -1477,6 +1263,10 @@ function applyExportSettings(delayMs = 180): void {
   persistSettingsSilently();
   const apply = () => {
     exportSettingsTimer = null;
+    const activeAssetId = selectedCanvas || selectedSvg;
+    if (activeAssetId && editedSvgByAsset.has(activeAssetId)) {
+      status(workspaceStatus, 'Aset sedang memakai hasil Edit. Klik Reset Edit untuk menerapkan Export Settings.', 'idle');
+    }
     renderCanvases(detectedAssets);
     refreshPreview().catch(error => status(workspaceStatus, errorMessage(error), 'error'));
   };
@@ -1506,11 +1296,6 @@ function loadPersistedSettings(): void {
   const maxPixels = Number(stored.maxPixels);
   if (Number.isFinite(minPixels) && minPixels > 0) $<HTMLInputElement>('minPixels').value = String(minPixels);
   if (Number.isFinite(maxPixels) && maxPixels > 0) $<HTMLInputElement>('maxPixels').value = String(maxPixels);
-  if (typeof stored.backgroundColor === 'string' && /^#[0-9a-f]{6}$/i.test(stored.backgroundColor)) {
-    $<HTMLInputElement>('backgroundColor').value = stored.backgroundColor;
-  }
-  if (typeof stored.removeAssetColors === 'boolean') $<HTMLInputElement>('removeAssetColors').checked = stored.removeAssetColors;
-  if (typeof stored.applyBackgroundColor === 'boolean') $<HTMLInputElement>('applyBackgroundColor').checked = stored.applyBackgroundColor;
   if (typeof stored.artworkScale === 'number' && Number.isFinite(stored.artworkScale)) {
     artworkScale = Math.round(Math.min(ARTWORK_SCALE_MAX, Math.max(ARTWORK_SCALE_MIN, stored.artworkScale)) * 100) / 100;
   }
@@ -1527,8 +1312,6 @@ function loadPersistedSettings(): void {
   }
   syncRatioInputsFromSelection();
   updateRatioControls();
-  syncColorControls();
-  syncBackgroundColorPicker();
   updateArtworkScaleControl();
   updatePreviewZoomControl();
 }
@@ -1619,14 +1402,20 @@ async function performVectorDownload(format: 'svg' | 'eps'): Promise<void> {
     const base = rawFilename.replace(/\.(svg|eps)$/i, '');
     const filenameToSave = `${base}.${format}`;
 
+    const activeAssetId = selectedSvg || selectedCanvas;
+    const edited = activeAssetId ? editedSvgByAsset.get(activeAssetId) : undefined;
     let savedPath: string;
-    if (format === 'eps') {
+    if (edited) {
+      savedPath = format === 'eps'
+        ? await invoke<string>('save_raw_eps', { svg: edited.svg, filename: filenameToSave, saveDirectory })
+        : await invoke<string>('save_raw_svg', { svg: edited.svg, filename: filenameToSave, saveDirectory });
+    } else if (format === 'eps') {
       savedPath = selectedSvg
-        ? await invoke<string>('save_eps_asset', { svgId: selectedSvg, settings: settings(), filename: filenameToSave, sourceMarkup: selectedSvgSourceMarkup(), saveDirectory })
+        ? await invoke<string>('save_eps_asset', { svgId: selectedSvg, settings: settings(), filename: filenameToSave, sourceMarkup: null, saveDirectory })
         : await invoke<string>('save_eps', { canvasId: selectedCanvas, settings: settings(), filename: filenameToSave, saveDirectory });
     } else {
       savedPath = selectedSvg
-        ? await invoke<string>('save_svg_asset', { svgId: selectedSvg, settings: settings(), filename: filenameToSave, sourceMarkup: selectedSvgSourceMarkup(), saveDirectory })
+        ? await invoke<string>('save_svg_asset', { svgId: selectedSvg, settings: settings(), filename: filenameToSave, sourceMarkup: null, saveDirectory })
         : await invoke<string>('save_svg', { canvasId: selectedCanvas, settings: settings(), filename: filenameToSave, saveDirectory });
     }
     showDownloadToast(`Download tersimpan: ${savedPath}`);
@@ -1759,123 +1548,9 @@ function setArtworkScaleValue(value: number): void {
   applyExportSettings(120);
 }
 
-function syncColorControls(): void {
-  const applyBackgroundColor = $<HTMLInputElement>('applyBackgroundColor').checked;
-  const removeAssetColors = $<HTMLInputElement>('removeAssetColors').checked;
-  $('assetColorControls').hidden = !removeAssetColors;
-  $<HTMLInputElement>('assetRemovalColor').disabled = !removeAssetColors;
-  $<HTMLInputElement>('assetRemovalColorHex').disabled = !removeAssetColors;
-  $<HTMLButtonElement>('pickAssetColor').disabled = !removeAssetColors;
-  $('backgroundColorControls').hidden = !applyBackgroundColor;
-  $<HTMLInputElement>('backgroundColor').disabled = !applyBackgroundColor;
-  $<HTMLInputElement>('backgroundColorHex').disabled = !applyBackgroundColor;
-  $<HTMLButtonElement>('pickBackgroundColor').disabled = !applyBackgroundColor;
-}
-
-function normalizedHexColor(value: string): string | null {
-  const normalized = value.trim();
-  return /^#[0-9a-f]{6}$/i.test(normalized) ? normalized.toUpperCase() : null;
-}
-
-function syncAssetRemovalColor(color: string): void {
-  $<HTMLInputElement>('assetRemovalColor').value = color;
-  $<HTMLInputElement>('assetRemovalColorHex').value = color;
-}
-
-function syncBackgroundColorPicker(): void {
-  const color = $<HTMLInputElement>('backgroundColor').value;
-  $<HTMLInputElement>('backgroundColorHex').value = color.toUpperCase();
-}
-
-type EyeDropperInstance = { open(): Promise<{ sRGBHex: string }> };
-type EyeDropperConstructor = new () => EyeDropperInstance;
-
-async function sampleScreenColor(): Promise<string | null> {
-  try {
-    const nativeColor = await invoke<string | null>('pick_screen_color');
-    const color = nativeColor && normalizedHexColor(nativeColor);
-    if (color) return color;
-  } catch (_) {
-    // Continue with the WebView picker when the native picker is unavailable.
-  }
-  const EyeDropper = (window as Window & { EyeDropper?: EyeDropperConstructor }).EyeDropper;
-  if (!EyeDropper) return null;
-  try {
-    const result = await new EyeDropper().open();
-    return normalizedHexColor(result.sRGBHex);
-  } catch (_) {
-    return null;
-  }
-}
-
-async function pickBackgroundColor(): Promise<void> {
-  const colorInput = $<HTMLInputElement>('backgroundColor');
-  const color = await sampleScreenColor();
-  if (!color) {
-    if (!(window as Window & { EyeDropper?: EyeDropperConstructor }).EyeDropper) colorInput.click();
-    return;
-  }
-  colorInput.value = color;
-  syncBackgroundColorPicker();
-  applyExportSettings(0);
-}
-
-function colorDistanceSquared(left: string, right: string): number {
-  return [1, 3, 5].reduce((sum, index) => {
-    const difference = parseInt(left.slice(index, index + 2), 16) - parseInt(right.slice(index, index + 2), 16);
-    return sum + difference * difference;
-  }, 0);
-}
-
-function applySampledAssetColor(assetId: string, sampled: string): void {
-  if (assetId !== (selectedCanvas || selectedSvg)) return;
-  const currentColors = selectedAssetColors();
-  const nearest = currentColors?.map(color => ({ color, distance: colorDistanceSquared(color, sampled) }))
-    .sort((left, right) => left.distance - right.distance)[0];
-  if (!nearest || nearest.distance > 48 * 48) {
-    status(workspaceStatus, `Warna ${sampled} tidak cocok dengan warna aset. Ambil warna dari bagian dalam objek.`, 'error');
-    return;
-  }
-  updateRemovedAssetColor(assetId, nearest.color, true);
-  status(workspaceStatus, `Warna ${nearest.color} dipilih untuk dihapus.`, 'success');
-}
-
-function applyPendingRemovalColor(): void {
-  if (!pendingRemovalColor || !$<HTMLInputElement>('removeAssetColors').checked) return;
-  const assetId = selectedCanvas || selectedSvg;
-  if (!assetId || !selectedAssetColors()?.length) return;
-  const color = pendingRemovalColor;
-  pendingRemovalColor = null;
-  applySampledAssetColor(assetId, color);
-}
-
-function chooseAssetRemovalColor(value: string): void {
-  const color = normalizedHexColor(value);
-  if (!color) return;
-  syncAssetRemovalColor(color);
-  const assetId = selectedCanvas || selectedSvg;
-  if (!assetId || !selectedAssetColors()?.length) {
-    pendingRemovalColor = color;
-    status(workspaceStatus, assetId ? 'Warna siap. Menunggu palet aset' : 'Warna siap. Pilih aset untuk menerapkan penghapusan');
-    return;
-  }
-  pendingRemovalColor = null;
-  applySampledAssetColor(assetId, color);
-}
-
-async function pickAssetColor(): Promise<void> {
-  if (!$<HTMLInputElement>('removeAssetColors').checked) return;
-  const sampled = await sampleScreenColor();
-  if (sampled) {
-    chooseAssetRemovalColor(sampled);
-  } else if (!(window as Window & { EyeDropper?: EyeDropperConstructor }).EyeDropper) {
-    $<HTMLInputElement>('assetRemovalColor').click();
-  }
-}
-
 function thumbnailKey(item: CanvasDetection): string {
-  const current = settings(item.canvas_id);
-  return [item.canvas_id, item.revision, item.width, item.height, current.ratio, current.minPixels, current.maxPixels, current.transparentBackground ? '' : current.backgroundColor, current.transparentBackground, current.artworkScale, ...current.removedColors].join('|');
+  const current = settings();
+  return [item.canvas_id, item.revision, item.width, item.height, current.ratio, current.minPixels, current.maxPixels, current.artworkScale].join('|');
 }
 
 function svgThumbnailKey(item: SvgAsset): string {
@@ -2008,10 +1683,7 @@ function renderCanvases(items: CanvasDetection[], options: { generateThumbnails?
       previewFilenameOverride = nextCanvas ? filenameOverrides[nextCanvas] || null : null;
       closeFilenameEditor();
       updateFilenameDisplay();
-      markedElements.clear();
-      updateObjectEraserUI();
     }
-    renderAssetColorList();
     renderCanvases(detectedAssets); refreshPreview().catch(error => status(workspaceStatus, errorMessage(error), 'error'));
   }));
   if (generateThumbnails) void loadThumbnails(filtered);
@@ -2019,7 +1691,6 @@ function renderCanvases(items: CanvasDetection[], options: { generateThumbnails?
 
 function renderSvgAssets(items: SvgAsset[]): void {
   detectedSvgAssets = items;
-  if (selectedSvg) renderAssetColorList();
   const activeIds = new Set(items.map(item => item.svg_id));
   svgThumbnailUrls.forEach((url, id) => {
     if (!activeIds.has(id)) {
@@ -2044,11 +1715,8 @@ function renderSvgAssets(items: SvgAsset[]): void {
       previewFilenameOverride = nextSvg ? filenameOverrides[nextSvg] || null : null;
       closeFilenameEditor();
       updateFilenameDisplay();
-      markedElements.clear();
-      updateObjectEraserUI();
     }
     renderSvgAssets(detectedSvgAssets);
-    renderAssetColorList();
     refreshPreview().catch(error => status(workspaceStatus, errorMessage(error), 'error'));
   }));
   loadSvgThumbnails(items);
@@ -2081,7 +1749,7 @@ async function loadThumbnails(items: CanvasDetection[]): Promise<void> {
     const loadingSlot = Array.from(canvasList.querySelectorAll<HTMLElement>('[data-thumb-canvas]')).find(element => element.dataset.thumbCanvas === item.canvas_id);
     if (loadingSlot && !loadingSlot.querySelector('.thumbnail-spinner')) loadingSlot.innerHTML = thumbnailLoadingHtml;
     try {
-      const result = await invoke<SvgResult>('generate_svg', { canvasId: item.canvas_id, settings: settings(item.canvas_id) });
+      const result = await invoke<SvgResult>('generate_svg', { canvasId: item.canvas_id, settings: settings() });
       const url = URL.createObjectURL(new Blob([result.svg], { type: 'image/svg+xml' }));
       const current = detectedAssets.find(asset => asset.canvas_id === item.canvas_id);
       if (!current || thumbnailKey(current) !== itemKey) { URL.revokeObjectURL(url); return; }
@@ -2131,12 +1799,7 @@ function resetDetectedSurfaces(): void {
   detectedSvgAssets = [];
   canvasList.innerHTML = '<p class="muted">Belum ada Canvas.</p>';
   svgList.innerHTML = '<p class="muted">Belum ada SVG.</p>';
-  removedColorsByAsset.clear();
-  pendingRemovalColor = null;
-  canvasColors.clear();
-  svgColors.clear();
-  canvasColorRequests.clear();
-  renderAssetColorList();
+  editedSvgByAsset.clear();
   svgThumbnailUrls.forEach(url => URL.revokeObjectURL(url));
   svgThumbnailUrls.clear();
   svgThumbnailKeys.clear();
@@ -2149,8 +1812,7 @@ function resetDetectedSurfaces(): void {
   previewPanStart = null;
   previewPinchStart = null;
   $('previewStage').innerHTML = '<p class="muted">Preview akan tampil setelah canvas direkam.</p>';
-  markedElements.clear();
-  updateObjectEraserUI();
+  updateVectorEditorButtons();
   updatePreviewZoomControl();
   $('previewTitle').textContent = 'Rendered Preview';
   closeFilenameEditor();
@@ -2176,18 +1838,6 @@ function renderSvgToPreviewStage(svgText: string): void {
     return;
   }
 
-  let counter = 0;
-  const isSvg = Boolean(selectedSvg);
-  svgEl.querySelectorAll(SVG_PAINT_ELEMENTS).forEach(el => {
-    if (el.closest('defs')) return;
-    if (el.id === 'background-color' || el.closest('#background')) return;
-    const id = el.id || (isSvg ? `svg-el-${counter++}` : `el-${counter++}`);
-    el.setAttribute('data-eraser-id', id);
-    if (markedElements.has(id)) {
-      el.setAttribute('data-eraser-marked', 'true');
-    }
-  });
-
   const artWidth = lastSvg?.stats.artboard.width || 1000;
   const artHeight = lastSvg?.stats.artboard.height || 1000;
   const stageWidth = stage.clientWidth || 800;
@@ -2206,7 +1856,6 @@ function renderSvgToPreviewStage(svgText: string): void {
   svgEl.setAttribute('height', '100%');
   wrap.appendChild(svgEl);
   stage.replaceChildren(wrap);
-  stage.classList.toggle('wireframe-mode', wireframeModeActive);
   updatePreviewZoomControl();
 }
 
@@ -2218,26 +1867,40 @@ async function refreshPreview(): Promise<void> {
 async function renderPreview(request: number): Promise<void> {
   const svgId = selectedSvg;
   if (svgId) {
-    renderAssetColorList();
-    const result = await invoke<SvgResult>('generate_svg_asset', { svgId, settings: settings(), sourceMarkup: selectedSvgSourceMarkup() });
+    const edited = editedSvgByAsset.get(svgId);
+    const result = await invoke<SvgResult>('generate_svg_asset', { svgId, settings: settings(), sourceMarkup: null });
     if (request !== previewRequest || svgId !== selectedSvg) return;
     if (previewFilenameCanvasId !== svgId) {
       previewFilenameCanvasId = svgId;
       previewFilenameOverride = filenameOverrides[svgId] || null;
     }
     const filename = previewFilenameOverride || result.filename;
-    lastSvg = { ...result, filename };
-    renderSvgToPreviewStage(result.svg);
-    updateObjectEraserUI();
+    if (edited) {
+      lastSvg = {
+        ...result,
+        svg: edited.svg,
+        filename,
+        stats: {
+          ...result.stats,
+          artboard: { ...result.stats.artboard, width: edited.width, height: edited.height, pixels: edited.width * edited.height },
+        },
+      };
+    } else {
+      lastSvg = { ...result, filename };
+    }
+    renderSvgToPreviewStage(lastSvg.svg);
+    updateVectorEditorButtons();
     $('previewTitle').textContent = 'Vector Preview'; updateFilenameDisplay();
-    $('artboardSize').textContent = `${result.stats.artboard.width}×${result.stats.artboard.height}`;
+    $('artboardSize').textContent = `${lastSvg.stats.artboard.width}×${lastSvg.stats.artboard.height}`;
     $('exportSvg').removeAttribute('disabled');
     return;
   }
   const canvasId = selectedCanvas;
-  if (!canvasId) return;
-  renderAssetColorList();
-  void loadCanvasColors(canvasId).catch(error => status(workspaceStatus, errorMessage(error), 'error'));
+  if (!canvasId) {
+    updateVectorEditorButtons();
+    return;
+  }
+  const edited = editedSvgByAsset.get(canvasId);
   const result = await invoke<SvgResult>('generate_svg', { canvasId, settings: settings() });
   if (request !== previewRequest || selectedCanvas !== canvasId) return;
   if (previewFilenameCanvasId !== canvasId) {
@@ -2245,11 +1908,23 @@ async function renderPreview(request: number): Promise<void> {
     previewFilenameOverride = filenameOverrides[canvasId] || null;
   }
   const filename = previewFilenameOverride || result.filename;
-  lastSvg = { ...result, filename };
-  renderSvgToPreviewStage(result.svg);
-  updateObjectEraserUI();
+  if (edited) {
+    lastSvg = {
+      ...result,
+      svg: edited.svg,
+      filename,
+      stats: {
+        ...result.stats,
+        artboard: { ...result.stats.artboard, width: edited.width, height: edited.height, pixels: edited.width * edited.height },
+      },
+    };
+  } else {
+    lastSvg = { ...result, filename };
+  }
+  renderSvgToPreviewStage(lastSvg.svg);
+  updateVectorEditorButtons();
   $('previewTitle').textContent = 'Preview SVG'; updateFilenameDisplay();
-  $('artboardSize').textContent = `${result.stats.artboard.width}×${result.stats.artboard.height}`;
+  $('artboardSize').textContent = `${lastSvg.stats.artboard.width}×${lastSvg.stats.artboard.height}`;
   $('exportSvg').removeAttribute('disabled');
   if (result.error) status(workspaceStatus, result.error);
 }
@@ -2310,6 +1985,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initBrandFlip();
   initRecorderLoader($('landingRecorder'));
   renderIcons();
+  vectorEditor = new VectorEditorController($('vectorEditorView'));
   discoverControl = initDiscover(count => showDownloadToast(`${count} kabar baru dari Mahes. Buka Discover untuk melihatnya.`));
   window.addEventListener('keydown', handleRefreshShortcut);
   loadTheme();
@@ -2427,45 +2103,6 @@ document.addEventListener('DOMContentLoaded', () => {
       applyExportSettings(240);
     });
   });
-  ['removeAssetColors', 'applyBackgroundColor'].forEach(id => {
-    $(id).addEventListener('change', () => {
-      syncColorControls();
-      if (id === 'removeAssetColors') renderAssetColorList();
-      applyExportSettings(0);
-    });
-  });
-  $<HTMLInputElement>('backgroundColor').addEventListener('input', () => {
-    syncBackgroundColorPicker();
-    applyExportSettings(160);
-  });
-  const backgroundColorHex = $<HTMLInputElement>('backgroundColorHex');
-  backgroundColorHex.addEventListener('input', () => {
-    const color = normalizedHexColor(backgroundColorHex.value);
-    if (!color) return;
-    $<HTMLInputElement>('backgroundColor').value = color;
-    backgroundColorHex.value = color;
-    applyExportSettings(160);
-  });
-  backgroundColorHex.addEventListener('blur', syncBackgroundColorPicker);
-  $<HTMLInputElement>('assetRemovalColor').addEventListener('change', event => {
-    chooseAssetRemovalColor((event.currentTarget as HTMLInputElement).value);
-  });
-  const assetRemovalColorHex = $<HTMLInputElement>('assetRemovalColorHex');
-  assetRemovalColorHex.addEventListener('input', () => {
-    if (normalizedHexColor(assetRemovalColorHex.value)) chooseAssetRemovalColor(assetRemovalColorHex.value);
-  });
-  assetRemovalColorHex.addEventListener('blur', () => {
-    syncAssetRemovalColor($<HTMLInputElement>('assetRemovalColor').value.toUpperCase());
-  });
-  $('pickBackgroundColor').addEventListener('click', () => { void pickBackgroundColor(); });
-  $('pickAssetColor').addEventListener('click', () => { void pickAssetColor(); });
-  $('assetColorList').addEventListener('click', event => {
-    const button = (event.target as Element).closest<HTMLButtonElement>('[data-color]');
-    const assetId = selectedCanvas || selectedSvg;
-    const color = button?.dataset.color;
-    if (!assetId || !color) return;
-    updateRemovedAssetColor(assetId, color);
-  });
   $('previewZoomSlider').addEventListener('input', event => {
     setPreviewZoomValue(Number((event.currentTarget as HTMLInputElement).value));
   });
@@ -2486,7 +2123,6 @@ document.addEventListener('DOMContentLoaded', () => {
   previewStage.addEventListener('pointerdown', event => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     event.preventDefault();
-    pointerDownPos = { x: event.clientX, y: event.clientY };
     previewStage.setPointerCapture(event.pointerId);
     previewPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     startPreviewGesture();
@@ -2506,13 +2142,6 @@ document.addEventListener('DOMContentLoaded', () => {
       previewPanStart = null;
       previewPinchStart = null;
       previewStage.classList.remove('is-interacting');
-      if (pointerDownPos) {
-        const dist = Math.hypot(event.clientX - pointerDownPos.x, event.clientY - pointerDownPos.y);
-        if (dist < 6 && objectEraserActive) {
-          handleObjectEraserClick(event.clientX, event.clientY);
-        }
-        pointerDownPos = null;
-      }
     }
   };
   previewStage.addEventListener('pointerup', endPreviewPointer);
@@ -2524,16 +2153,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setPreviewZoomValue(previewZoom - event.deltaY * 0.001);
   }, { passive: false });
   $('resetPreview').addEventListener('click', resetPreviewView);
-  $('wireframePreview')?.addEventListener('change', event => {
-    toggleWireframeMode(Boolean((event.currentTarget as HTMLInputElement).checked));
-  });
-  $('eraseMarkedObjects').addEventListener('click', () => {
-    if (!objectEraserActive) toggleObjectEraserMode(true);
-    else if (markedElements.size > 0) void eraseMarkedObjects();
-    else toggleObjectEraserMode(false);
-  });
-  $('clearMarkedObjects').addEventListener('click', clearMarkedObjects);
-  $('restoreErasedObjects').addEventListener('click', () => { void restoreErasedObjects(); });
+  $('openVectorEditor').addEventListener('click', openVectorEditorForCurrentAsset);
+  $('resetVectorEdits').addEventListener('click', () => { void resetVectorEditsForCurrentAsset(); });
   $('artworkScaleSlider').addEventListener('input', event => {
     setArtworkScaleValue(Number((event.currentTarget as HTMLInputElement).value));
   });
@@ -2560,17 +2181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   window.addEventListener('keydown', event => {
-    if (objectEraserActive) {
-      if ((event.key === 'Delete' || event.key === 'Backspace') && markedElements.size > 0) {
-        event.preventDefault();
-        void eraseMarkedObjects();
-        return;
-      } else if (event.key === 'Escape' && markedElements.size > 0) {
-        event.preventDefault();
-        clearMarkedObjects();
-        return;
-      }
-    }
+    if (vectorEditor?.isOpen()) return;
     const motivationModal = $('motivationModal');
     if (motivationModal && !motivationModal.hidden) {
       if (event.key === 'Escape') {

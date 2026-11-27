@@ -447,15 +447,3 @@ test('license product code comes from LICENSE_PRODUCT_CODE', () => {
   assert.match(licenseCreate, /issuedInWib/);
   assert.match(licenseRust, /option_env!\("LICENSE_PRODUCT_CODE"\)/);
 });
-
-test('preview groups interactive object eraser controls', () => {
-  assert.match(index, /id="eraseMarkedObjects"/);
-  assert.match(index, /id="clearMarkedObjects"/);
-  assert.match(index, /id="restoreErasedObjects"/);
-  assert.match(styles, /\.preview-eraser-actions/);
-  assert.match(styles, /\.preview-stage\.eraser-mode/);
-  assert.match(styles, /\[data-eraser-marked="true"\]/);
-  assert.match(main, /objectEraserActive/);
-  assert.match(main, /eraseMarkedObjects/);
-  assert.match(main, /renderSvgToPreviewStage/);
-});

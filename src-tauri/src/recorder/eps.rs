@@ -769,6 +769,210 @@ pub fn build_svg_asset_eps(
     (eps, (width, height, ratio))
 }
 
+fn parse_clip_ref(attr: Option<&str>) -> Option<&str> {
+    let trimmed = attr?.trim();
+    let rest = trimmed.strip_prefix("url(#")?;
+    rest.strip_suffix(')')
+}
+
+fn render_svg_node_eps(
+    node: roxmltree::Node<'_, '_>,
+    clips: &std::collections::HashMap<String, String>,
+    eps: &mut String,
+) {
+    if !node.is_element() {
+        return;
+    }
+    let tag = node.tag_name().name();
+    if matches!(
+        tag,
+        "defs" | "clipPath" | "mask" | "pattern" | "symbol" | "marker" | "title" | "desc" | "metadata"
+    ) {
+        return;
+    }
+    if node.attribute("display") == Some("none") || node.attribute("visibility") == Some("hidden") {
+        return;
+    }
+
+    if tag == "g" || tag == "svg" {
+        let clip_ps = parse_clip_ref(node.attribute("clip-path")).and_then(|id| clips.get(id));
+        if let Some(clip) = clip_ps {
+            eps.push_str("gsave\nnewpath\n");
+            eps.push_str(clip);
+            eps.push_str("clip\n");
+        }
+        for child in node.children() {
+            render_svg_node_eps(child, clips, eps);
+        }
+        if clip_ps.is_some() {
+            eps.push_str("grestore\n");
+        }
+        return;
+    }
+
+    if tag == "path" {
+        let Some(d) = node.attribute("d") else {
+            return;
+        };
+        let Some(path_ps) = path_to_postscript(d) else {
+            return;
+        };
+        let fill = node.attribute("fill").unwrap_or("#000000");
+        let stroke = node.attribute("stroke");
+        let fill_rule = node.attribute("fill-rule").unwrap_or("evenodd");
+        let clip_ps = parse_clip_ref(node.attribute("clip-path")).and_then(|id| clips.get(id));
+
+        eps.push_str("gsave\n");
+        if let Some(clip) = clip_ps {
+            eps.push_str("newpath\n");
+            eps.push_str(clip);
+            eps.push_str("clip\n");
+        }
+
+        if let Some((r, g, b)) = parse_color_rgb(fill) {
+            eps.push_str(&format!("{} {} {} setrgbcolor\n", f(r), f(g), f(b)));
+            eps.push_str("newpath\n");
+            eps.push_str(&path_ps);
+            if fill_rule == "evenodd" {
+                eps.push_str("eofill\n");
+            } else {
+                eps.push_str("fill\n");
+            }
+        }
+
+        if let Some(stroke_color) = stroke {
+            if let Some((r, g, b)) = parse_color_rgb(stroke_color) {
+                let stroke_width = node
+                    .attribute("stroke-width")
+                    .and_then(|w| w.parse::<f64>().ok())
+                    .unwrap_or(1.0);
+                if stroke_width > 0.0 {
+                    let cap = match node.attribute("stroke-linecap") {
+                        Some("round") => 1,
+                        Some("square") => 2,
+                        _ => 0,
+                    };
+                    let join = match node.attribute("stroke-linejoin") {
+                        Some("round") => 1,
+                        Some("bevel") => 2,
+                        _ => 0,
+                    };
+                    eps.push_str(&format!("{} {} {} setrgbcolor\n", f(r), f(g), f(b)));
+                    eps.push_str(&format!("{} setlinewidth\n", f(stroke_width)));
+                    eps.push_str(&format!("{cap} setlinecap\n"));
+                    eps.push_str(&format!("{join} setlinejoin\n"));
+                    eps.push_str("newpath\n");
+                    eps.push_str(&path_ps);
+                    eps.push_str("stroke\n");
+                }
+            }
+        }
+
+        eps.push_str("grestore\n");
+    }
+}
+
+pub fn build_raw_svg_eps(svg: &str, title: &str) -> Result<(String, (u64, u64)), String> {
+    let document = roxmltree::Document::parse(svg)
+        .map_err(|error| format!("Gagal membaca SVG hasil edit: {error}"))?;
+    let root = document.root_element();
+    if root.tag_name().name() != "svg" {
+        return Err("Elemen root bukan SVG".into());
+    }
+
+    let vb_nums: Vec<f64> = root
+        .attribute("viewBox")
+        .map(|vb| {
+            vb.split(|c: char| c.is_whitespace() || c == ',')
+                .filter_map(|part| part.trim().parse::<f64>().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let (vb_x, vb_y, vb_w, vb_h) = if vb_nums.len() == 4 && vb_nums[2] > 0.0 && vb_nums[3] > 0.0 {
+        (vb_nums[0], vb_nums[1], vb_nums[2], vb_nums[3])
+    } else {
+        let w = root
+            .attribute("width")
+            .and_then(|v| v.trim_end_matches("px").parse::<f64>().ok())
+            .unwrap_or(1024.0)
+            .max(1.0);
+        let h = root
+            .attribute("height")
+            .and_then(|v| v.trim_end_matches("px").parse::<f64>().ok())
+            .unwrap_or(1024.0)
+            .max(1.0);
+        (0.0, 0.0, w, h)
+    };
+
+    let width = root
+        .attribute("width")
+        .and_then(|v| v.trim_end_matches("px").parse::<f64>().ok())
+        .map(|v| v.round().max(1.0) as u64)
+        .unwrap_or_else(|| vb_w.round().max(1.0) as u64);
+    let height = root
+        .attribute("height")
+        .and_then(|v| v.trim_end_matches("px").parse::<f64>().ok())
+        .map(|v| v.round().max(1.0) as u64)
+        .unwrap_or_else(|| vb_h.round().max(1.0) as u64);
+
+    let mut clips = std::collections::HashMap::new();
+    for clip_node in document
+        .descendants()
+        .filter(|node| node.has_tag_name("clipPath"))
+    {
+        if let Some(id) = clip_node.attribute("id") {
+            let mut combined = String::new();
+            for path in clip_node.descendants().filter(|n| n.has_tag_name("path")) {
+                if let Some(d) = path.attribute("d") {
+                    if let Some(ps) = path_to_postscript(d) {
+                        combined.push_str(&ps);
+                    }
+                }
+            }
+            if !combined.is_empty() {
+                clips.insert(id.to_string(), combined);
+            }
+        }
+    }
+
+    let scale_x = width as f64 / vb_w.max(1e-4);
+    let scale_y = height as f64 / vb_h.max(1e-4);
+
+    let mut eps = String::with_capacity(16_384);
+    eps.push_str("%!PS-Adobe-3.0 EPSF-3.0\n");
+    eps.push_str("%%Creator: Canvas Vector Recorder Desktop\n");
+    eps.push_str(&format!("%%Title: {title}\n"));
+    eps.push_str("%%Pages: 1\n");
+    eps.push_str(&format!("%%BoundingBox: 0 0 {width} {height}\n"));
+    eps.push_str(&format!(
+        "%%HiResBoundingBox: 0.0000 0.0000 {:.4} {:.4}\n",
+        width as f64, height as f64
+    ));
+    eps.push_str("%%LanguageLevel: 3\n");
+    eps.push_str("%%EndComments\n");
+    eps.push_str("%%Page: 1 1\n");
+    eps.push_str("save\n");
+    eps.push_str(&format!("0 {height} translate\n"));
+    eps.push_str("1 -1 scale\n");
+    eps.push_str("gsave\n");
+    eps.push_str(&format!("{} {} scale\n", f(scale_x), f(scale_y)));
+    if vb_x.abs() > 1e-6 || vb_y.abs() > 1e-6 {
+        eps.push_str(&format!("{} {} translate\n", f(-vb_x), f(-vb_y)));
+    }
+
+    for child in root.children() {
+        render_svg_node_eps(child, &clips, &mut eps);
+    }
+
+    eps.push_str("grestore\n");
+    eps.push_str("restore\n");
+    eps.push_str("showpage\n");
+    eps.push_str("%%EOF\n");
+
+    Ok((eps, (width, height)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -833,5 +1037,29 @@ mod tests {
         assert!(eps.contains("1 0 0 setrgbcolor\n")); // #ff0000
         assert!(eps.contains("fill\n"));
         assert!(eps.contains("showpage\n%%EOF\n"));
+    }
+
+    #[test]
+    fn raw_svg_eps_preserves_clips_strokes_caps_joins_and_skips_hidden() {
+        let svg = r##"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="2000" height="1000" viewBox="0 0 200 100">
+  <defs><clipPath id="clip-0" clipPathUnits="userSpaceOnUse"><path clip-rule="nonzero" d="M0 0L200 0L200 100L0 100Z"/></clipPath></defs>
+  <path id="mv-canvas-bg" fill="#f5f5f5" fill-rule="evenodd" d="M0 0L200 0L200 100L0 100Z"/>
+  <g clip-path="url(#clip-0)">
+    <path fill="#ff0000" fill-rule="evenodd" stroke="#0000ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="bevel" d="M10 10L90 10L90 90L10 90Z"/>
+    <path fill="#00ff00" display="none" d="M100 10L150 10L150 90L100 90Z"/>
+  </g>
+</svg>"##;
+        let (eps, (w, h)) = build_raw_svg_eps(svg, "edited.eps").expect("raw svg should convert");
+        assert_eq!((w, h), (2000, 1000));
+        assert!(eps.contains("%%BoundingBox: 0 0 2000 1000\n"));
+        assert!(eps.contains("10 10 scale\n"));
+        assert!(eps.contains("clip\n"));
+        assert!(eps.contains("eofill\n"));
+        assert!(eps.contains("3 setlinewidth\n"));
+        assert!(eps.contains("1 setlinecap\n"));
+        assert!(eps.contains("2 setlinejoin\n"));
+        assert!(!eps.contains("0 1 0 setrgbcolor"));
+        assert!(eps.ends_with("%%EOF\n"));
     }
 }

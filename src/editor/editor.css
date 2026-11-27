@@ -1,0 +1,920 @@
+.vector-editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: var(--m3-surface-low);
+  color: var(--m3-on-surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.ve-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.ve-topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 6px 14px;
+  background: var(--m3-surface-container);
+  border-bottom: 1px solid var(--m3-outline-variant);
+  flex-shrink: 0;
+}
+
+.ve-topbar-left,
+.ve-topbar-center,
+.ve-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ve-topbar-center {
+  justify-content: center;
+}
+
+.ve-topbar-right {
+  justify-content: flex-end;
+}
+
+.ve-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+.ve-heading strong {
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ve-stats {
+  font-size: 11px;
+  color: var(--m3-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ve-topbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--m3-outline-variant);
+  margin: 0 4px;
+}
+
+#vectorEditorView button.ve-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--m3-on-surface);
+}
+
+#vectorEditorView button.ve-icon-btn:hover:not(:disabled) {
+  background: var(--m3-surface-high);
+  border-color: var(--m3-outline-variant);
+}
+
+#vectorEditorView button.ve-icon-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+.ve-zoom-badge {
+  min-width: 44px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--m3-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ve-wireframe-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  color: var(--m3-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ve-wireframe-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--m3-primary);
+}
+
+.ve-save-btn {
+  min-height: 34px;
+  padding: 6px 18px;
+  border-radius: 12px;
+  font-size: 12.5px;
+}
+
+.ve-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ve-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 68px;
+  padding: 10px 6px;
+  background: var(--m3-surface-container);
+  border-right: 1px solid var(--m3-outline-variant);
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+#vectorEditorView button.ve-dock-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 54px;
+  min-height: 48px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--m3-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+#vectorEditorView button.ve-dock-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+#vectorEditorView button.ve-dock-btn:hover {
+  background: var(--m3-surface-high);
+  border-color: transparent;
+  color: var(--m3-on-surface);
+}
+
+#vectorEditorView button.ve-dock-btn.is-selected,
+#vectorEditorView button.ve-dock-btn.is-selected:hover {
+  background: var(--m3-primary-container);
+  color: var(--m3-on-primary-container);
+  border-color: var(--m3-primary);
+  font-weight: 700;
+}
+
+.ve-dock-divider {
+  width: 34px;
+  height: 1px;
+  background: var(--m3-outline-variant);
+  margin: 4px 0;
+}
+
+.ve-stage-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #edf0f4;
+  overflow: hidden;
+}
+
+:root[data-theme="dark"] .ve-stage-wrap {
+  background: #17181b;
+}
+
+.ve-canvas-host {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+
+.ve-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ve-live-feedback {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(32, 33, 36, 0.9);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.ve-eyedropper-loupe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--m3-surface-container);
+  border: 1px solid var(--m3-outline-variant);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.ve-eyedropper-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--m3-outline-variant);
+}
+
+.ve-eyedropper-hex {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--m3-on-surface);
+}
+
+.ve-selection-strip {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 14px;
+  border-radius: 999px;
+  background: var(--m3-surface-container);
+  border: 1px solid var(--m3-outline-variant);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  z-index: 4;
+}
+
+.ve-selection-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--m3-on-primary-container);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--m3-primary-container);
+}
+
+.ve-selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#vectorEditorView button.ve-strip-btn {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--m3-surface);
+  color: var(--m3-on-surface);
+  border: 1px solid var(--m3-outline-variant);
+}
+
+#vectorEditorView button.ve-strip-btn:hover {
+  background: var(--m3-surface-high);
+  border-color: var(--m3-primary);
+}
+
+#vectorEditorView button.ve-strip-btn.is-destructive {
+  color: var(--m3-error);
+  border-color: transparent;
+  background: transparent;
+}
+
+#vectorEditorView button.ve-strip-btn.is-destructive:hover {
+  background: var(--m3-error-container);
+  border-color: transparent;
+}
+
+.ve-notice {
+  position: absolute;
+  left: 50%;
+  bottom: 66px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: #202124;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 550;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 6;
+}
+
+.ve-inspector {
+  width: 316px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--m3-surface-container);
+  border-left: 1px solid var(--m3-outline-variant);
+  min-height: 0;
+}
+
+.ve-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--m3-outline-variant);
+  flex-shrink: 0;
+}
+
+.ve-inspector-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--m3-on-surface);
+}
+
+.ve-inspector-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 20px;
+}
+
+.ve-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ve-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--m3-muted);
+  letter-spacing: 0.03em;
+}
+
+.ve-panel-row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ve-inline-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ve-value-text {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--m3-on-surface);
+  font-variant-numeric: tabular-nums;
+}
+
+#vectorEditorView button.ve-link-btn {
+  min-height: 22px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--m3-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#vectorEditorView button.ve-link-btn:hover {
+  background: var(--m3-primary-container);
+}
+
+.ve-slider-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--m3-muted);
+  margin-top: -6px;
+}
+
+.ve-divider {
+  border: 0;
+  border-top: 1px solid var(--m3-outline-variant);
+  margin: 4px 0;
+}
+
+.ve-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--m3-surface-high);
+  border: 1px solid var(--m3-outline-variant);
+}
+
+#vectorEditorView button.ve-seg-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--m3-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#vectorEditorView button.ve-seg-btn:hover {
+  color: var(--m3-on-surface);
+  background: transparent;
+}
+
+#vectorEditorView button.ve-seg-btn.is-selected,
+#vectorEditorView button.ve-seg-btn.is-selected:hover {
+  background: var(--m3-surface);
+  color: var(--m3-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.ve-chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#vectorEditorView button.ve-chip {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  color: var(--m3-on-surface);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+#vectorEditorView button.ve-chip:hover {
+  background: var(--m3-surface-high);
+  border-color: var(--m3-primary);
+}
+
+#vectorEditorView button.ve-chip.is-selected,
+#vectorEditorView button.ve-chip.is-selected:hover {
+  background: var(--m3-primary-container);
+  color: var(--m3-on-primary-container);
+  border-color: var(--m3-primary);
+}
+
+.ve-size-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.ve-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--m3-muted);
+  font-weight: 600;
+}
+
+.ve-num-input {
+  width: 100%;
+  height: 34px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  color: var(--m3-on-surface);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ve-times-sep {
+  padding-bottom: 8px;
+  color: var(--m3-muted);
+  font-weight: 700;
+}
+
+.ve-apply-btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.ve-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ve-swatch-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+#vectorEditorView button.ve-swatch-dot {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--m3-outline-variant);
+}
+
+#vectorEditorView button.ve-swatch-dot:hover {
+  border-color: var(--m3-primary);
+  transform: scale(1.08);
+}
+
+#vectorEditorView button.ve-swatch-dot.is-selected {
+  border: 2.5px solid var(--m3-primary);
+  transform: scale(1.1);
+}
+
+.ve-slider-row {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.ve-slider-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--m3-muted);
+}
+
+.ve-hex-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ve-native-color {
+  width: 38px;
+  height: 34px;
+  padding: 2px;
+  border-radius: 10px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  cursor: pointer;
+}
+
+.ve-hex-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  color: var(--m3-on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.ve-action-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.ve-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ve-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#vectorEditorView button.ve-action-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 52px;
+  padding: 8px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  color: var(--m3-on-surface);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#vectorEditorView button.ve-action-tile:hover:not(:disabled) {
+  border-color: var(--m3-primary);
+  background: var(--m3-surface-high);
+}
+
+#vectorEditorView button.ve-action-tile.is-destructive {
+  color: var(--m3-error);
+}
+
+#vectorEditorView button.ve-action-tile.is-destructive:hover:not(:disabled) {
+  border-color: var(--m3-error);
+  background: var(--m3-error-container);
+}
+
+.ve-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ve-icon-wrap svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ve-layers-list {
+  gap: 5px;
+}
+
+.ve-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--m3-surface);
+  cursor: pointer;
+}
+
+.ve-layer-row:hover {
+  background: var(--m3-surface-high);
+}
+
+.ve-layer-row.is-selected {
+  background: var(--m3-primary-container);
+  border-color: var(--m3-primary);
+}
+
+.ve-layer-row.is-hidden {
+  opacity: 0.55;
+}
+
+.ve-layer-thumb {
+  border-radius: 6px;
+  border: 1px solid var(--m3-outline-variant);
+  flex-shrink: 0;
+  display: block;
+}
+
+.ve-layer-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ve-layer-row.is-selected .ve-layer-name {
+  font-weight: 700;
+  color: var(--m3-on-primary-container);
+}
+
+.ve-layer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+#vectorEditorView button.ve-layer-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--m3-muted);
+}
+
+#vectorEditorView button.ve-layer-icon-btn:hover:not(:disabled) {
+  background: var(--m3-surface-high);
+  color: var(--m3-on-surface);
+}
+
+#vectorEditorView button.ve-layer-icon-btn.is-active {
+  color: var(--m3-primary);
+}
+
+#vectorEditorView button.ve-layer-icon-btn.is-muted {
+  opacity: 0.5;
+}
+
+#vectorEditorView button.ve-layer-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ve-empty-notice {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--m3-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ve-discard-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.ve-discard-card {
+  width: min(100%, 380px);
+  padding: 22px 24px;
+  border-radius: 18px;
+  background: var(--m3-surface-container);
+  border: 1px solid var(--m3-outline-variant);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.28);
+}
+
+.ve-discard-card h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.ve-discard-card p {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--m3-muted);
+}
+
+.ve-discard-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#vectorEditorView button.ve-btn-danger {
+  color: #ffffff;
+  background: var(--m3-error);
+  border-color: transparent;
+  font-weight: 650;
+}
+
+#vectorEditorView button.ve-btn-danger:hover {
+  filter: brightness(0.92);
+}
+
+/* Preview header Edit button styling */
+.preview-edit-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+#workspaceView button.preview-tool-edit-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--m3-outline-variant);
+  background: var(--m3-surface);
+  color: var(--m3-muted);
+}
+
+#workspaceView button.preview-tool-edit-secondary:hover:not(:disabled) {
+  color: var(--m3-on-surface);
+  border-color: var(--gemini-blue);
+  background: var(--m3-surface-high);
+}
+
+#workspaceView button.preview-tool-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px !important;
+  padding: 5px 12px !important;
+  border-radius: 12px !important;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  color: var(--m3-on-primary-container);
+  background: var(--m3-primary-container);
+  border-color: transparent;
+}
+
+#workspaceView button.preview-tool-edit:hover:not(:disabled) {
+  background: var(--gemini-blue);
+  color: #ffffff;
+  border-color: transparent;
+}
+
+#workspaceView button.preview-tool-edit.has-edits {
+  box-shadow: inset 0 0 0 1.5px var(--gemini-blue);
+}
+
+:root[data-theme="dark"] #vectorEditorView button.ve-seg-btn.is-selected,
+:root[data-theme="dark"] #vectorEditorView button.ve-seg-btn.is-selected:hover {
+  background: #303134;
+  color: #8ab4f8;
+}
+
+:root[data-theme="dark"] #vectorEditorView button.ve-action-tile,
+:root[data-theme="dark"] #vectorEditorView .ve-layer-row,
+:root[data-theme="dark"] #vectorEditorView button.ve-chip,
+:root[data-theme="dark"] #vectorEditorView .ve-wireframe-toggle {
+  background: #202124;
+  border-color: #3c4043;
+}
+
+:root[data-theme="dark"] #vectorEditorView button.ve-chip.is-selected,
+:root[data-theme="dark"] #vectorEditorView .ve-layer-row.is-selected,
+:root[data-theme="dark"] #vectorEditorView button.ve-dock-btn.is-selected,
+:root[data-theme="dark"] #vectorEditorView button.ve-dock-btn.is-selected:hover {
+  background: var(--m3-primary-container);
+  color: var(--m3-on-primary-container);
+  border-color: var(--m3-primary);
+}
+
+:root[data-theme="dark"] #workspaceView button.preview-tool-edit {
+  color: var(--m3-on-primary-container);
+  background: var(--m3-primary-container);
+  border-color: transparent;
+}
+
+:root[data-theme="dark"] #workspaceView button.preview-tool-edit:hover:not(:disabled) {
+  background: #1a73e8;
+  color: #ffffff;
+}

@@ -385,6 +385,45 @@ pub fn save_eps_asset(
     Ok(path.to_string_lossy().to_string())
 }
 
+const MAX_EDITED_SVG_BYTES: usize = 12 * 1024 * 1024;
+
+#[tauri::command]
+pub fn save_raw_svg(
+    app: AppHandle,
+    svg: String,
+    filename: Option<String>,
+    save_directory: Option<String>,
+) -> Result<String, AppError> {
+    if svg.len() > MAX_EDITED_SVG_BYTES || !svg.contains("<svg") {
+        return Err(AppError::InvalidEvent("SVG hasil edit tidak valid".into()));
+    }
+    let raw_filename = filename.as_deref().unwrap_or("vectorized-result.svg");
+    let directory = export_directory(&app, save_directory.as_deref())?;
+    let path = unique_download_path(&directory, &safe_svg_filename(raw_filename));
+    std::fs::write(&path, svg).map_err(|error| AppError::Storage(error.to_string()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn save_raw_eps(
+    app: AppHandle,
+    svg: String,
+    filename: Option<String>,
+    save_directory: Option<String>,
+) -> Result<String, AppError> {
+    if svg.len() > MAX_EDITED_SVG_BYTES || !svg.contains("<svg") {
+        return Err(AppError::InvalidEvent("SVG hasil edit tidak valid".into()));
+    }
+    let raw_filename = filename.as_deref().unwrap_or("vectorized-result.eps");
+    let safe_filename = safe_eps_filename(raw_filename);
+    let (eps, _) = recorder::eps::build_raw_svg_eps(&svg, &safe_filename)
+        .map_err(AppError::InvalidEvent)?;
+    let directory = export_directory(&app, save_directory.as_deref())?;
+    let path = unique_download_path(&directory, &safe_filename);
+    std::fs::write(&path, eps).map_err(|error| AppError::Storage(error.to_string()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 fn export_directory(app: &AppHandle, selected: Option<&str>) -> Result<PathBuf, AppError> {
     if let Some(selected) = selected {
         let directory = PathBuf::from(selected);

@@ -236,34 +236,6 @@
                   <input id="artworkScaleSlider" type="range" min="0.5" max="5" step="0.1" value="1"
                     aria-label="Atur ukuran aset">
                 </div>
-                <div class="background-settings">
-                  <label class="check-label"><input id="removeAssetColors" type="checkbox"> Hapus warna asli dari objek</label>
-                  <div id="assetColorControls" class="asset-color-controls" hidden>
-                    <label class="color-label">
-                      <span class="color-picker-row">
-                        <input id="assetRemovalColor" type="color" value="#ffffff"
-                          aria-label="Pilih warna yang dihapus">
-                        <input id="assetRemovalColorHex" type="text" value="#FFFFFF" maxlength="7" inputmode="text"
-                          autocomplete="off" spellcheck="false" aria-label="Kode HEX warna yang dihapus">
-                        <button id="pickAssetColor" class="icon-button" type="button" title="Ambil warna dari layar"
-                          aria-label="Ambil warna dari layar"><i data-lucide="pipette" aria-hidden="true"></i></button>
-                      </span>
-                    </label>
-                    <div id="assetColorList" class="asset-color-list"><span class="muted">Pilih aset untuk melihat
-                        warnanya.</span></div>
-                  </div>
-                  <label class="check-label"><input id="applyBackgroundColor" type="checkbox"> Terapkan warna
-                    background</label>
-                  <label id="backgroundColorControls" class="color-label" hidden>
-                    <span class="color-picker-row">
-                      <input id="backgroundColor" type="color" value="#ffffff" aria-label="Pilih warna background">
-                      <input id="backgroundColorHex" type="text" value="#FFFFFF" maxlength="7" inputmode="text"
-                        autocomplete="off" spellcheck="false" aria-label="Kode HEX warna background">
-                      <button id="pickBackgroundColor" class="icon-button" type="button" title="Ambil warna dari layar"
-                        aria-label="Ambil warna dari layar"><i data-lucide="pipette" aria-hidden="true"></i></button>
-                    </span>
-                  </label>
-                </div>
               </div>
             </div>
           </details>
@@ -273,24 +245,16 @@
           <header class="preview-header">
             <h2 id="previewTitle">Preview</h2>
             <div class="preview-tools" aria-label="Kontrol preview">
-              <div class="preview-eraser-actions" role="group" aria-label="Aksi hapus objek">
-                <button id="eraseMarkedObjects" class="preview-tool-eraser" type="button" aria-pressed="false"
-                  title="Pilih objek yang akan dihapus">
-                  <i data-lucide="trash-2" aria-hidden="true"></i><span>Hapus Objek</span>
+              <div class="preview-edit-actions" role="group" aria-label="Aksi edit vektor">
+                <button id="openVectorEditor" class="preview-tool-edit" type="button" disabled
+                  title="Edit objek, warna, pathfinder, layer, dan kanvas">
+                  <i data-lucide="pencil" aria-hidden="true"></i><span>Edit</span>
                 </button>
-                <button id="clearMarkedObjects" class="preview-tool-eraser-secondary" type="button" hidden disabled
-                  title="Batal menandai objek" aria-label="Batal tandai">
-                  <i data-lucide="x" aria-hidden="true"></i>
-                </button>
-                <button id="restoreErasedObjects" class="preview-tool-eraser-secondary" type="button" hidden disabled
-                  title="Kembalikan objek yang telah dihapus" aria-label="Pulihkan objek terhapus">
+                <button id="resetVectorEdits" class="preview-tool-edit-secondary" type="button" hidden disabled
+                  title="Kembalikan vektor ke versi asli sebelum diedit" aria-label="Reset edit vektor">
                   <i data-lucide="rotate-ccw" aria-hidden="true"></i>
                 </button>
               </div>
-              <label class="check-label preview-tool-wireframe" title="Tampilkan wireframe / outline vektor">
-                <input id="wireframePreview" type="checkbox">
-                <span>Wireframe</span>
-              </label>
               <button id="resetPreview" class="preview-reset-button" type="button" title="Reset zoom dan posisi canvas">
                 <i data-lucide="rotate-cw" aria-hidden="true"></i><span>Reset</span>
               </button>
@@ -453,6 +417,7 @@
       </footer>
     </div>
   </div>
+  <section id="vectorEditorView" class="vector-editor-overlay" aria-label="Vector Editor" hidden></section>
   <div id="downloadToast" class="toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="/main.ts"></script>
 </body>
